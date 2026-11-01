@@ -11,7 +11,8 @@ router = DefaultRouter()
 router.register("threads", views.ThreadViewSet, basename="thread")
 
 urlpatterns = [
-    path("models/", views.ModelListView.as_view(), name="models"),
+    path("touchpoints/", views.TouchpointListView.as_view(), name="touchpoints"),
+    path("touchpoints/<str:name>/models/", views.TouchpointModelsView.as_view(), name="touchpoint-models"),
     path("graphs/", views.GraphListView.as_view(), name="graphs"),
     path("", include(router.urls)),
 ]

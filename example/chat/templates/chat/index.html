@@ -47,8 +47,13 @@ const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
 const log = document.getElementById("log");
 let threadId = null;
 
-fetch("/llm/api/models/").then(r => r.ok ? r.json() : []).then(models => {
-  for (const m of models) document.getElementById("model").add(new Option(`${m.name} · ${m.model}`, m.name));
+fetch("/llm/api/touchpoints/chat.assistant/models/").then(r => r.ok ? r.json() : {models: []}).then(data => {
+  const sel = document.getElementById("model");
+  if (data.default) sel.options[0].text = `default · ${data.default}`;
+  for (const m of data.models) {
+    const price = m.price_input ? ` · $${Number(m.price_input)}/1M in` : "";
+    sel.add(new Option(`${m.ref}${price}`, m.ref));
+  }
 });
 
 function bubble(cls, text = "") {

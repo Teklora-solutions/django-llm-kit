@@ -6,6 +6,9 @@ Each registered target is a dotted path (``"pkg.mod:attr"`` or
 * an uncompiled ``StateGraph`` builder -> compiled with the checkpointer
 * a compiled graph -> copied with the checkpointer attached (unless it has one)
 * a callable ``fn(checkpointer) -> compiled graph`` (e.g. wrapping ``create_agent``)
+
+or a dict ``{"graph": <one of the above>, "touchpoint": "<name>"}`` naming the
+touchpoint whose model policy applies to a client's ``"model"`` choice.
 """
 
 from __future__ import annotations
@@ -42,6 +45,8 @@ def import_target(path: str) -> Any:
 
 
 def compile_target(name: str, target: Any, checkpointer: Any) -> Pregel:
+    if isinstance(target, Mapping):
+        target = target.get("graph")
     if isinstance(target, str):
         target = import_target(target)
     if isinstance(target, StateGraph):
@@ -77,6 +82,21 @@ class GraphRegistry:
         self._default = default
         self._cache: dict[str, Pregel] = {}
         self._lock = threading.Lock()
+
+    def touchpoint_name(self, name: str) -> str | None:
+        """The touchpoint a client's ``"model"`` choice applies to, if the graph declares one."""
+        target = self._targets().get(name)
+        return target.get("touchpoint") if isinstance(target, Mapping) else None
+
+    def import_modules(self) -> None:
+        """Import every registered graph's module (without compiling it), so
+        touchpoints declared next to graphs are registered at startup."""
+        for target in self._targets().values():
+            if isinstance(target, Mapping):
+                target = target.get("graph")
+            if isinstance(target, str):
+                module_path, sep, _ = target.partition(":")
+                importlib.import_module(module_path if sep else target.rpartition(".")[0])
 
     def names(self) -> list[str]:
         return list(self._targets())

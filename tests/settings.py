@@ -50,11 +50,12 @@ LLM_KIT = {
         "chat": "tests.graphs:chat_builder",
         "approval": "tests.graphs:make_approval_graph",
         "boom": "tests.graphs.boom_graph",
-        "catalogue": "tests.graphs:catalogue_builder",
+        "catalogue": {"graph": "tests.graphs:catalogue_builder", "touchpoint": "tests.chat"},
         "slow": "tests.graphs:slow_builder",
     },
     "DEFAULT_GRAPH": "chat",
-    "MODELS": {"fake": {"model": "fake:echo"}},
+    "MODEL_BACKEND": "tests.graphs:fake_backend",
+    "ENCRYPTION_KEYS": ["test-encryption-passphrase"],
 }
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 

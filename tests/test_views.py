@@ -52,13 +52,39 @@ async def test_interrupt_then_resume(async_client, user):
     assert {"ask": {"log": ["approved=ok"]}} in [d for e, d in events if e == "update"]
 
 
-async def test_model_choice_reaches_graph(async_client, user, fake_init):
+@pytest.fixture
+def synced_catalogue(db):
+    from llm_kit import catalogue
+    from tests.catalogue_payloads import FakeSources
+
+    catalogue.sync(fetch=FakeSources())
+
+
+async def test_model_choice_goes_through_the_touchpoint(async_client, user, built, keys, synced_catalogue):
     await async_client.aforce_login(user)
-    events = await read_events(
-        await post(async_client, "/llm/stream/", {"graph": "catalogue", "message": "hi", "model": "fake"})
-    )
+    body = {"graph": "catalogue", "message": "hi", "model": "google/gemini-3.8-flash"}
+    events = await read_events(await post(async_client, "/llm/stream/", body))
     assert events[-1][0] == "end"
-    assert fake_init == [("fake:echo", {})]
+    assert [b[0] for b in built] == ["gemini/gemini-3.8-flash"]  # client's pick, normalised; no fallback needed
+
+    built.clear()
+    events = await read_events(await post(async_client, "/llm/stream/", {"graph": "catalogue", "message": "hi"}))
+    assert [b[0] for b in built] == [
+        "anthropic/claude-sonnet-5-5",
+        "gemini/gemini-3.8-flash",
+    ]  # code default + fallback
+
+
+async def test_disallowed_model_is_rejected_before_a_thread_exists(async_client, user, keys, synced_catalogue):
+    await async_client.aforce_login(user)
+    before = await Thread.objects.acount()
+    r = await post(async_client, "/llm/stream/", {"graph": "catalogue", "message": "x", "model": "openai/gpt-5.5"})
+    assert r.status_code == 400 and "not in allowed patterns" in json.loads(r.content)["detail"]
+    r = await post(
+        async_client, "/llm/stream/", {"graph": "chat", "message": "x", "model": "anthropic/claude-sonnet-5-5"}
+    )
+    assert r.status_code == 400 and "does not accept a model choice" in json.loads(r.content)["detail"]
+    assert await Thread.objects.acount() == before
 
 
 async def test_errors(async_client, user, other_user):
@@ -66,7 +92,7 @@ async def test_errors(async_client, user, other_user):
     assert (await post(async_client, "/llm/stream/", {"message": "x"})).status_code == 401
     await async_client.aforce_login(user)
     assert (await post(async_client, "/llm/stream/", {"graph": "nope"})).status_code == 400
-    assert (await post(async_client, "/llm/stream/", {"model": "nope", "message": "x"})).status_code == 400
+    assert (await post(async_client, "/llm/stream/", {"model": 5, "message": "x"})).status_code == 400
     assert (await async_client.post("/llm/stream/", "not json", content_type="application/json")).status_code == 400
     assert (await async_client.get("/llm/stream/")).status_code == 405
 

@@ -56,12 +56,10 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LLM_KIT = {
-    "GRAPHS": {"assistant": "chat.graphs:builder"},
-    "DEFAULT_MODEL": os.environ.get("LLM_KIT_MODEL", "anthropic:claude-sonnet-5-5"),
-    "MODELS": {
-        "fast": {"model": "anthropic:claude-haiku-5-5", "temperature": 0},
-        "smart": {"model": "anthropic:claude-opus-5-5"},
-    },
+    # The graph's "touchpoint" is the policy a client's "model" choice is checked against.
+    "GRAPHS": {"assistant": {"graph": "chat.graphs:builder", "touchpoint": "chat.assistant"}},
     # Demo only: lets you try the page without logging in. Keep True in real apps.
     "REQUIRE_AUTH": False,
 }
+if os.environ.get("LLM_KIT_DEMO_OFFLINE"):
+    LLM_KIT["MODEL_BACKEND"] = "chat.offline:backend"

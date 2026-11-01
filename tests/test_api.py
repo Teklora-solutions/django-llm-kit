@@ -1,7 +1,7 @@
 import pytest
 from rest_framework.test import APIClient
 
-from llm_kit.models import Checkpoint, LLMModel, Thread
+from llm_kit.models import Checkpoint, Thread
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -58,14 +58,27 @@ def test_isolation_between_users(api, other_user):
 def test_validation(api):
     assert api.post("/llm/api/threads/", {"graph": "nope"}, format="json").status_code == 400
     tid = api.post("/llm/api/threads/", {}, format="json").data["id"]
-    r = api.post(f"/llm/api/threads/{tid}/runs/", {"message": "x", "model": "nope"}, format="json")
-    assert r.status_code == 400
+    r = api.post(
+        f"/llm/api/threads/{tid}/runs/", {"message": "x", "model": "anthropic/claude-sonnet-5-5"}, format="json"
+    )
+    assert r.status_code == 400  # the default "chat" graph declares no touchpoint
     assert api.get(f"/llm/api/threads/{tid}/history/?limit=abc").status_code == 400
 
 
-def test_models_and_graphs(api):
-    LLMModel.objects.create(name="smart", model="anthropic:claude-opus-5-5", description="Best")
-    data = api.get("/llm/api/models/").data
-    assert [(m["name"], m["source"]) for m in data] == [("fake", "settings"), ("smart", "db")]
-    assert "api_key_env" not in data[0]
-    assert {g["name"] for g in api.get("/llm/api/graphs/").data} == {"chat", "approval", "boom", "catalogue", "slow"}
+def test_touchpoints_graphs_and_model_picker(api, keys):
+    from llm_kit import catalogue
+    from tests.catalogue_payloads import FakeSources
+
+    catalogue.sync(fetch=FakeSources())
+    tps = {t["name"]: t for t in api.get("/llm/api/touchpoints/").data}
+    assert tps["tests.chat"]["choice"] == "client" and tps["tests.chat"]["default"] == "anthropic/claude-sonnet-5-5"
+
+    data = api.get("/llm/api/touchpoints/tests.chat/models/").data
+    assert data["default"] == "anthropic/claude-sonnet-5-5"
+    # allow=anthropic/* or gemini/*, requires tool_call: claude-old-1 has no tool calling
+    assert [m["ref"] for m in data["models"]] == ["anthropic/claude-sonnet-5-5", "gemini/gemini-3.8-flash"]
+    assert data["models"][0]["price_input"] == "2.00000000"
+    assert api.get("/llm/api/touchpoints/nope/models/").status_code == 404
+
+    graphs = {g["name"]: g["touchpoint"] for g in api.get("/llm/api/graphs/").data}
+    assert graphs["catalogue"] == "tests.chat" and graphs["chat"] is None

@@ -62,14 +62,15 @@ def _resolve_thread(thread_id, user, body):
     if thread_id is None:
         graph = body.get("graph") or default_graph_name()
         get_graph(graph)  # raises UnknownGraph
+        runs.validate_choice(graph, body.get("model"))  # before creating anything
         message = body.get("message")
         title = body.get("title") or (message if isinstance(message, str) else "")
         thread = Thread.objects.create(graph=graph, user=access.owner_for_new_thread(user), title=str(title)[:255])
         created = True
     else:
         thread = access.get_thread(thread_id, user)
+        runs.validate_choice(thread.graph, body.get("model"))
         created = False
-    runs.validate_model(body.get("model"))
     return thread, created
 
 

@@ -38,8 +38,27 @@ class RunSerializer(serializers.Serializer):
     config = serializers.DictField(required=False)
 
 
-class ModelSpecSerializer(serializers.Serializer):
+class TouchpointSerializer(serializers.Serializer):
     name = serializers.CharField()
-    model = serializers.CharField()
     description = serializers.CharField()
-    source = serializers.CharField()
+    choice = serializers.SerializerMethodField()
+    default = serializers.CharField()
+
+    def get_choice(self, tp) -> str:
+        from llm_kit.core.touchpoints import ClientChoice
+
+        return "client" if isinstance(tp.choice, ClientChoice) else "server"
+
+
+class CatalogueModelSerializer(serializers.Serializer):
+    ref = serializers.CharField()
+    name = serializers.CharField()
+    provider = serializers.CharField()
+    kind = serializers.CharField()
+    context_window = serializers.IntegerField(allow_null=True)
+    max_output = serializers.IntegerField(allow_null=True)
+    tool_call = serializers.BooleanField(allow_null=True)
+    reasoning = serializers.BooleanField(allow_null=True)
+    input_modalities = serializers.ListField(source="input_modality_list")
+    price_input = serializers.DecimalField(max_digits=20, decimal_places=8, allow_null=True, coerce_to_string=True)
+    price_output = serializers.DecimalField(max_digits=20, decimal_places=8, allow_null=True, coerce_to_string=True)

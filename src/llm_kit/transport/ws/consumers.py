@@ -82,12 +82,11 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         if self.thread is None:
             graph = payload.get("graph") or default_graph_name()
             get_graph(graph)
+            runs.validate_choice(graph, payload.get("model"))  # before creating anything
             self.thread = Thread.objects.create(graph=graph, user=access.owner_for_new_thread(self.user))
-            created = True
-        else:
-            created = False
-        runs.validate_model(payload.get("model"))
-        return created
+            return True
+        runs.validate_choice(self.thread.graph, payload.get("model"))
+        return False
 
     async def _run(self, payload):
         try:

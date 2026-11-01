@@ -13,8 +13,6 @@ from typing import Any
 DEFAULTS: dict[str, Any] = {
     "GRAPHS": {},
     "DEFAULT_GRAPH": None,
-    "DEFAULT_MODEL": None,
-    "MODELS": {},
     "REQUIRE_AUTH": True,
     # Stream modes requested from LangGraph for streamed runs.
     "STREAM_MODES": ["messages", "updates"],
@@ -26,6 +24,15 @@ DEFAULTS: dict[str, Any] = {
     # age after which `llm_kit_status` reports the catalogue as stale.
     "CATALOGUE_SOURCES": None,
     "CATALOGUE_MAX_AGE_HOURS": 24,
+    # Model construction: "auto" (LiteLLM if installed, else LangChain's
+    # init_chat_model), "litellm", "langchain", or a dotted path to
+    # fn(ref: str, params: dict, api_keys: list[str]) -> BaseChatModel.
+    "MODEL_BACKEND": "auto",
+    # Extra kwargs for litellm.Router when a provider has several keys.
+    "LITELLM_ROUTER": {"routing_strategy": "simple-shuffle", "num_retries": 0},
+    # Keys for encrypting ProviderKey rows: a list, newest first (rotation).
+    # Each is a Fernet key or any passphrase (hashed to one).
+    "ENCRYPTION_KEYS": None,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

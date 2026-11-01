@@ -16,3 +16,19 @@ class UnknownGraph(LLMKitError, LookupError):
 
 class UnknownModel(LLMKitError, LookupError):
     pass
+
+
+class UnknownTouchpoint(LLMKitError, LookupError):
+    pass
+
+
+class TouchpointDisabled(LLMKitError):
+    """An admin switched this touchpoint off."""
+
+
+class ModelNotAllowed(BadRequest):
+    """A client asked for a model the touchpoint's policy does not allow."""
+
+    def __init__(self, message: str, reasons: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.reasons = reasons or []

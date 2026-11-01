@@ -23,11 +23,10 @@ from __future__ import annotations
 from typing import Any
 
 from llm_kit import conf  # noqa: F401  (wires settings.LLM_KIT into the core config)
-from llm_kit.core.errors import BadRequest, UnknownModel
+from llm_kit.core.errors import BadRequest, LLMKitError
 from llm_kit.core.runs import astream_run, build_input, error_message, invoke_run
 from llm_kit.core.runs import build_config as _build_config
 from llm_kit.core.serialize import message_text, message_to_json, state_to_json, to_json
-from llm_kit.runtime.legacy_catalogue import resolve
 
 __all__ = [
     "BadRequest",
@@ -40,7 +39,7 @@ __all__ = [
     "message_to_json",
     "state_to_json",
     "to_json",
-    "validate_model",
+    "validate_choice",
 ]
 
 
@@ -52,10 +51,22 @@ def build_config(thread, payload: dict[str, Any], user=None) -> dict[str, Any]:
     return _build_config(thread.thread_id, payload, metadata)
 
 
-def validate_model(name: str | None) -> None:
-    """Raise BadRequest if a requested model is not resolvable (sync; call via sync_to_async)."""
-    if name:
-        try:
-            resolve(name)
-        except UnknownModel as e:
-            raise BadRequest(str(e)) from e
+def validate_choice(graph: str, requested: str | None) -> None:
+    """Check a client's ``"model"`` against the graph's touchpoint before the run starts.
+
+    Raises BadRequest. Sync (catalogue lookups); call via ``sync_to_async`` in async code.
+    """
+    if not requested:
+        return
+    from llm_kit.core.touchpoints import get_touchpoint
+    from llm_kit.runtime.graphs import touchpoint_name
+
+    name = touchpoint_name(graph)
+    if name is None:
+        raise BadRequest(f"Graph {graph!r} does not accept a model choice (no touchpoint declared).")
+    try:
+        get_touchpoint(name).resolve(requested)
+    except BadRequest:
+        raise
+    except LLMKitError as e:
+        raise BadRequest(str(e)) from e

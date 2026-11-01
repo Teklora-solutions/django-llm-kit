@@ -10,6 +10,16 @@ def _fresh_graphs():
     graphs.clear_cache()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    """Rolled-back test transactions fire no signals, so cached overrides/keys must be reset."""
+    from django.core.cache import cache
+
+    cache.clear()
+    yield
+    cache.clear()
+
+
 @pytest.fixture
 def saver():
     from llm_kit.persistence.saver import DjangoSaver
@@ -18,18 +28,19 @@ def saver():
 
 
 @pytest.fixture
-def fake_init(monkeypatch):
-    """Replace init_chat_model with one that records calls and returns an echo model."""
-    from tests.graphs import EchoModel
+def built():
+    """Models built by the fake backend during the test."""
+    from tests.graphs import BUILT
 
-    calls = []
+    BUILT.clear()
+    return BUILT
 
-    def fake(model, **kwargs):
-        calls.append((model, kwargs))
-        return EchoModel(messages=iter([]))
 
-    monkeypatch.setattr("llm_kit.runtime.legacy_catalogue.init_chat_model", fake)
-    return calls
+@pytest.fixture
+def keys(monkeypatch):
+    """API keys for the providers used in tests."""
+    for var in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY", "OPENAI_API_KEY"):
+        monkeypatch.setenv(var, f"key-{var.lower()}")
 
 
 @pytest.fixture

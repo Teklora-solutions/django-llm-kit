@@ -39,6 +39,10 @@ def default_graph_name() -> str | None:
     return registry.default_name()
 
 
+def touchpoint_name(graph: str) -> str | None:
+    return registry.touchpoint_name(graph)
+
+
 def get_graph(name: str | None = None) -> Pregel:
     """Return the compiled graph registered as ``name`` (cached per process)."""
     return registry.get(name)

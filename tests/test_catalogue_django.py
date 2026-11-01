@@ -179,5 +179,6 @@ def test_admin_pages_render(client, django_user_model, synced):
 def test_top_level_exports():
     import llm_kit
 
-    assert callable(llm_kit.model_from_config) and callable(llm_kit.get_chat_model)
+    assert callable(llm_kit.touchpoint) and callable(llm_kit.get_touchpoint)
+    assert llm_kit.ClientChoice and llm_kit.ServerChoice
     assert callable(llm_kit.get_graph) and llm_kit.DjangoSaver.__name__ == "DjangoSaver"

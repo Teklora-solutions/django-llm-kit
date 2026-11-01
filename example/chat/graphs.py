@@ -1,13 +1,12 @@
-"""A small tool-calling assistant. The model is chosen per run from the catalogue."""
+"""A small tool-calling assistant. Its model policy lives in chat/touchpoints.py."""
 
-import os
 from datetime import UTC, datetime
 
 from langchain_core.tools import tool
 from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from llm_kit import model_from_config
+from chat.touchpoints import assistant
 
 
 @tool
@@ -20,11 +19,8 @@ TOOLS = [current_time]
 
 
 def call_model(state: MessagesState, config):
-    if os.environ.get("LLM_KIT_DEMO_OFFLINE"):  # try the UI with no API key
-        from chat.offline import EchoModel
-
-        return {"messages": [EchoModel(messages=iter([])).invoke(state["messages"], config)]}
-    llm = model_from_config(config).bind_tools(TOOLS)
+    # config carries the run's requested model ("model" in the request), checked against the touchpoint.
+    llm = assistant.model(config=config).bind_tools(TOOLS)
     return {"messages": [llm.invoke(state["messages"], config)]}
 
 

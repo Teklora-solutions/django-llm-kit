@@ -59,10 +59,39 @@ _boom.add_edge(START, "explode")
 boom_graph = _boom.compile()
 
 
-def call_catalogue_model(state: MessagesState, config):
-    from llm_kit.runtime.legacy_catalogue import model_from_config
+# --- touchpoints, with a fake backend recording what it was asked to build
 
-    return {"messages": [model_from_config(config).invoke(state["messages"], config)]}
+BUILT: list[tuple[str, dict, list]] = []
+
+
+def fake_backend(ref, params, api_keys):
+    """MODEL_BACKEND for tests: an echo model; refs starting with "down/" always fail."""
+    BUILT.append((ref, dict(params), list(api_keys)))
+    model = FailingModel(messages=iter([])) if ref.startswith("down/") else EchoModel(messages=iter([]))
+    return model
+
+
+class FailingModel(GenericFakeChatModel):
+    def _generate(self, *a, **k):
+        raise ConnectionError("provider down")
+
+    def _stream(self, *a, **k):
+        raise ConnectionError("provider down")
+
+
+from llm_kit import ClientChoice, touchpoint  # noqa: E402
+
+chat_tp = touchpoint(
+    "tests.chat",
+    default="anthropic/claude-sonnet-5-5",
+    fallbacks=["gemini/gemini-3.8-flash"],
+    params={"temperature": 0},
+    choice=ClientChoice(allow=("anthropic/*", "gemini/*"), requires={"tool_call": True}),
+)
+
+
+def call_catalogue_model(state: MessagesState, config):
+    return {"messages": [chat_tp.model(config=config).invoke(state["messages"], config)]}
 
 
 catalogue_builder = StateGraph(MessagesState)

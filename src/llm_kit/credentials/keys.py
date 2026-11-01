@@ -1,0 +1,41 @@
+"""Which API keys exist for a provider: active DB keys first, then environment variables."""
+
+from __future__ import annotations
+
+import logging
+
+from llm_kit.core.catalogue.fields import normalise_provider
+from llm_kit.core.touchpoints.env import env_api_keys
+from llm_kit.runtime.versioned_cache import VersionedCache
+
+logger = logging.getLogger("llm_kit")
+
+_db_keys = VersionedCache("provider_keys")
+
+
+def _load_db_keys() -> dict[str, list[str]]:
+    from llm_kit.models import ProviderKey
+
+    out: dict[str, list[str]] = {}
+    for row in ProviderKey.objects.filter(active=True):
+        try:
+            out.setdefault(row.provider, []).append(row.get_key())
+        except Exception as e:  # undecryptable row: skip, but say so
+            logger.error("llm_kit: cannot decrypt ProviderKey %s (%s): %s", row.pk, row.provider, type(e).__name__)
+    return out
+
+
+def api_keys(provider: str) -> list[str]:
+    from llm_kit.models import CatalogueProvider
+
+    provider = normalise_provider(provider)
+    keys = list(_db_keys.get(_load_db_keys).get(provider, []))
+    env_names = CatalogueProvider.objects.filter(provider=provider).values_list("env", flat=True).first() or []
+    for k in env_api_keys(provider, env_names):
+        if k not in keys:
+            keys.append(k)
+    return keys
+
+
+def invalidate() -> None:
+    _db_keys.bump()

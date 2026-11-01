@@ -5,11 +5,18 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from llm_kit.core.errors import UnknownTouchpoint
+from llm_kit.core.touchpoints import all_touchpoints, get_touchpoint
 from llm_kit.models import Thread
-from llm_kit.runtime import access, legacy_catalogue, runs
-from llm_kit.runtime.graphs import get_graph, graph_names
+from llm_kit.runtime import access, runs
+from llm_kit.runtime.graphs import get_graph, graph_names, touchpoint_name
 from llm_kit.transport.api.permissions import ThreadAccess
-from llm_kit.transport.api.serializers import ModelSpecSerializer, RunSerializer, ThreadSerializer
+from llm_kit.transport.api.serializers import (
+    CatalogueModelSerializer,
+    RunSerializer,
+    ThreadSerializer,
+    TouchpointSerializer,
+)
 
 
 class ThreadViewSet(viewsets.ModelViewSet):
@@ -57,7 +64,7 @@ class ThreadViewSet(viewsets.ModelViewSet):
         body.is_valid(raise_exception=True)
         payload = dict(body.validated_data)
         try:
-            runs.validate_model(payload.get("model"))
+            runs.validate_choice(thread.graph, payload.get("model"))
             graph_input = runs.build_input(payload)
             config = runs.build_config(thread, payload, request.user)
         except runs.BadRequest as e:
@@ -67,17 +74,39 @@ class ThreadViewSet(viewsets.ModelViewSet):
         return Response(state, status=status.HTTP_200_OK)
 
 
-class ModelListView(APIView):
-    """Selectable chat models from the catalogue (DB + LLM_KIT['MODELS'])."""
+class TouchpointListView(APIView):
+    """Touchpoints declared in code, with who chooses their model."""
 
     permission_classes = [ThreadAccess]
 
     def get(self, request):
-        return Response(ModelSpecSerializer(legacy_catalogue.available(), many=True).data)
+        return Response(TouchpointSerializer(all_touchpoints(), many=True).data)
+
+
+class TouchpointModelsView(APIView):
+    """Models a client may pick for one touchpoint (empty when the server chooses)."""
+
+    permission_classes = [ThreadAccess]
+
+    def get(self, request, name):
+        from llm_kit.touchpoints import allowed_models
+
+        try:
+            tp = get_touchpoint(name)
+        except UnknownTouchpoint:
+            return Response({"detail": f"Unknown touchpoint {name!r}."}, status=status.HTTP_404_NOT_FOUND)
+        resolution = tp.resolve()
+        return Response(
+            {
+                "touchpoint": tp.name,
+                "default": resolution.model,
+                "models": CatalogueModelSerializer(allowed_models(tp), many=True).data,
+            }
+        )
 
 
 class GraphListView(APIView):
     permission_classes = [ThreadAccess]
 
     def get(self, request):
-        return Response([{"name": n} for n in graph_names()])
+        return Response([{"name": n, "touchpoint": touchpoint_name(n)} for n in graph_names()])
