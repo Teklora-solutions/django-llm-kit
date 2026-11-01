@@ -17,6 +17,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 
 from llm_kit.core import config
+from llm_kit.core.catalogue.fields import normalise_provider
 from llm_kit.core.observability.classify import classify_error
 from llm_kit.core.observability.context import current
 from llm_kit.core.observability.cost import estimate_tokens
@@ -155,6 +156,7 @@ class ObservabilityHandler(BaseCallbackHandler):
             requested_model=str(meta.get("llm_kit_requested") or ""),
             resolved_model=str(meta.get("llm_kit_resolved") or ""),
             model=str(model),
+            provider=normalise_provider(str(model).split("/", 1)[0]) if "/" in str(model) else "",
             chosen_by=str(meta.get("llm_kit_chosen_by") or ""),
             fallback_index=int(meta.get("llm_kit_candidate") or 0),
             prompt_hash=_hash(payload),

@@ -42,6 +42,12 @@ DEFAULTS: dict[str, Any] = {
     # Days to keep captured content and call rows (used by llm_kit_prune).
     "CONTENT_RETENTION_DAYS": 7,
     "CALL_RETENTION_DAYS": 90,
+    # Circuit breaker per provider: {"failures": 5, "window": 60, "cooldown": 60, "quota_cooldown": 900}
+    "CIRCUIT_BREAKER": {},
+    # Monitoring API permission (dotted DRF permission class; default: staff only).
+    "MONITORING_PERMISSION": None,
+    # Bearer token accepted by /llm/metrics/ (Prometheus); staff sessions always work.
+    "METRICS_TOKEN": None,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

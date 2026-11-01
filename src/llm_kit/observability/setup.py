@@ -32,7 +32,9 @@ def build_sinks(names) -> list:
 
 
 def configure() -> None:
+    from llm_kit.monitoring.breaker import observe
     from llm_kit.observability.prices import lookup
 
-    sinks = build_sinks(conf.get("RECORD_SINKS")) if conf.get("OBSERVABILITY") else []
-    recorder.configure(sinks, lookup)
+    enabled = conf.get("OBSERVABILITY")
+    sinks = build_sinks(conf.get("RECORD_SINKS")) if enabled else []
+    recorder.configure(sinks, lookup, observers=[observe] if enabled else [])

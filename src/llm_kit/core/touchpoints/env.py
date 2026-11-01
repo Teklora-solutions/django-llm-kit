@@ -41,6 +41,8 @@ class ResolutionEnv(Protocol):
 
     def api_keys(self, provider: str) -> list[str]: ...
 
+    # Optional: ``circuit_open(provider) -> bool``. Envs without it never skip providers.
+
 
 def env_api_keys(provider: str, extra_env_names: list[str] | tuple[str, ...] = ()) -> list[str]:
     """Keys from the environment: ``{P}_API_KEYS`` (comma-separated pool), then single-key variables."""

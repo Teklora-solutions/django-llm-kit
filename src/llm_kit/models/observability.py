@@ -23,6 +23,7 @@ class LLMCall(models.Model):
     requested_model = models.CharField(max_length=255, blank=True)
     resolved_model = models.CharField(max_length=255, blank=True)
     model = models.CharField(max_length=255, blank=True, help_text="The candidate this attempt used.")
+    provider = models.CharField(max_length=100, blank=True)
     served_model = models.CharField(max_length=255, blank=True, help_text="What the provider reported.")
     chosen_by = models.CharField(max_length=10, blank=True)
     fallback_index = models.PositiveSmallIntegerField(default=0)
@@ -52,6 +53,7 @@ class LLMCall(models.Model):
         indexes = [
             models.Index(fields=["touchpoint", "-started_at"]),
             models.Index(fields=["model", "-started_at"]),
+            models.Index(fields=["provider", "-started_at"]),
             models.Index(fields=["user", "-started_at"]),
             models.Index(fields=["tenant", "-started_at"]),
             models.Index(fields=["status", "-started_at"]),

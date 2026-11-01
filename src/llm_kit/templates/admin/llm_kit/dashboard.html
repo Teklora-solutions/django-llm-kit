@@ -1,0 +1,128 @@
+{% extends "admin/base_site.html" %}
+{% load static llm_kit %}
+
+{% block extrastyle %}{{ block.super }}
+<style>
+  .lk { --lk-bar: #2a78d6; --lk-good: #0ca30c; --lk-critical: #d03b3b; --lk-warning: #fab219;
+        --lk-ink: var(--body-fg); --lk-muted: var(--body-quiet-color); --lk-line: var(--hairline-color);
+        max-width: 1200px; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .lk { --lk-bar: #3987e5; } }
+  :root[data-theme="dark"] .lk { --lk-bar: #3987e5; }
+  .lk-periods { display: flex; gap: 8px; margin: 0 0 20px; flex-wrap: wrap; align-items: center; }
+  .lk-periods a { padding: 4px 12px; border: 1px solid var(--lk-line); border-radius: 999px; text-decoration: none; }
+  .lk-periods a[aria-current="page"] { background: var(--selected-bg); font-weight: 600; }
+  .lk-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .lk-tile { border: 1px solid var(--lk-line); border-radius: 8px; padding: 12px 14px; background: var(--body-bg); }
+  .lk-tile .label { color: var(--lk-muted); font-size: 12px; }
+  .lk-tile .value { font-size: 26px; font-weight: 600; color: var(--lk-ink); margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .lk-tile .sub { color: var(--lk-muted); font-size: 12px; margin-top: 2px; }
+  .lk h2 { margin: 28px 0 8px; font-size: 15px; background: none; color: var(--lk-ink); padding: 0; text-transform: none; letter-spacing: 0; }
+  .lk-chart { border: 1px solid var(--lk-line); border-radius: 8px; padding: 12px; background: var(--body-bg); }
+  .lk-chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .lk-chart .bar { fill: var(--lk-bar); }
+  .lk-chart .hit:hover + .bar, .lk-chart .bar:hover { opacity: .75; }
+  .lk-chart .hit { fill: transparent; }
+  .lk-chart text { fill: var(--lk-muted); font-size: 12px; }
+  .lk-chart text.val { fill: var(--lk-ink); font-size: 12px; font-weight: 600; }
+  .lk-chart .base { stroke: var(--lk-line); }
+  .lk-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 0 24px; }
+  .lk table { width: 100%; }
+  .lk td.num, .lk th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .lk-status { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--lk-ink); }
+  .lk-status .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .lk-status.good .dot { background: var(--lk-good); }
+  .lk-status.critical .dot { background: var(--lk-critical); }
+  .lk-status.warning .dot { background: var(--lk-warning); }
+  .lk-issues li { margin: 4px 0; }
+  .lk-empty { color: var(--lk-muted); padding: 8px 0; }
+  .lk details { margin-top: 8px; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> › <a href="{% url 'admin:app_list' 'llm_kit' %}">LLM Kit</a> › Monitoring</div>{% endblock %}
+
+{% block content %}
+<div class="lk">
+  <nav class="lk-periods" aria-label="Period">
+    {% for p in periods %}<a href="?period={{ p }}" {% if p == period %}aria-current="page"{% endif %}>Last {{ p }}</a>{% endfor %}
+    <span class="lk-empty">Same numbers as <code>llm_kit.monitoring</code> and <code>/llm/api/monitoring/</code>.</span>
+  </nav>
+
+  {% if not health.healthy %}
+  <h2>Needs attention</h2>
+  <ul class="lk-issues">{% for issue in health.issues %}<li><span class="lk-status critical"><span class="dot"></span>{{ issue }}</span></li>{% endfor %}</ul>
+  {% endif %}
+
+  <div class="lk-tiles">
+    <div class="lk-tile"><div class="label">Spend</div><div class="value">${{ s.cost|floatformat:4 }}</div><div class="sub">{% if s.unpriced %}+ {{ s.unpriced }} unpriced call{{ s.unpriced|pluralize }}{% else %}all calls priced{% endif %}</div></div>
+    <div class="lk-tile"><div class="label">Calls</div><div class="value">{{ s.calls|num }}</div><div class="sub">{{ s.runs }} run{{ s.runs|pluralize }}, {{ s.tool_calls }} tool call{{ s.tool_calls|pluralize }}</div></div>
+    <div class="lk-tile"><div class="label">Error rate</div><div class="value">{{ s.error_rate|pct }}</div><div class="sub">{{ s.errors }} failed</div></div>
+    <div class="lk-tile"><div class="label">p95 latency</div><div class="value">{% if s.latency_ms.p95 is not None %}{{ s.latency_ms.p95 }} ms{% else %}—{% endif %}</div><div class="sub">p50 {{ s.latency_ms.p50|default:"—" }} ms</div></div>
+    <div class="lk-tile"><div class="label">Fallback rate</div><div class="value">{{ s.fallback_rate|pct }}</div><div class="sub">{{ s.fallbacks }} answered by a fallback</div></div>
+    <div class="lk-tile"><div class="label">Tokens</div><div class="value">{{ s.input_tokens|add:s.output_tokens|num }}</div><div class="sub">{{ s.input_tokens|num }} in / {{ s.output_tokens|num }} out</div></div>
+  </div>
+
+  <h2>Spend per day</h2>
+  <div class="lk-chart">
+    {% if chart.peak %}
+    <svg viewBox="0 -4 {{ chart.width }} {{ chart.height }}" role="img" aria-label="Spend per day, last {{ chart.bars|length }} days">
+      <line class="base" x1="0" x2="{{ chart.width }}" y1="{{ chart.baseline }}" y2="{{ chart.baseline }}"/>
+      {% for b in chart.bars %}
+        <g>
+          <title>{{ b.title }}</title>
+          <rect class="hit" x="{{ b.hit_x }}" y="0" width="{{ b.hit_w }}" height="{{ chart.baseline }}"/>
+          {% if b.path %}<path class="bar" d="{{ b.path }}"/>{% endif %}
+        </g>
+        {% if b.label %}<text class="val" x="{{ b.label_x }}" y="{{ b.label_y }}" text-anchor="middle">{{ b.label }}</text>{% endif %}
+        {% if b.tick %}<text x="{{ b.label_x }}" y="{{ chart.tick_y }}" text-anchor="middle">{{ b.tick }}</text>{% endif %}
+      {% endfor %}
+    </svg>
+    {% else %}<div class="lk-empty">No priced calls in this period yet.</div>{% endif %}
+    <details><summary>Table view</summary>
+      <table><thead><tr><th>Day</th><th class="num">Spend (USD)</th></tr></thead>
+      <tbody>{% for day, value in chart.rows %}<tr><td>{{ day|date:"D d M" }}</td><td class="num">{{ value|floatformat:6 }}</td></tr>{% endfor %}</tbody></table>
+    </details>
+  </div>
+
+  <div class="lk-grid">
+    <div>
+      <h2>By touchpoint</h2>
+      {% if by_touchpoint %}<table><thead><tr><th>Touchpoint</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Spend</th><th class="num">p95 ms</th></tr></thead><tbody>
+      {% for r in by_touchpoint %}<tr><td><a href="../llmcall/?touchpoint={{ r.key|urlencode }}">{{ r.key|default:"(none)" }}</a></td><td class="num">{{ r.calls|num }}</td><td class="num">{{ r.error_rate|pct }}</td><td class="num">${{ r.cost|floatformat:4 }}</td><td class="num">{{ r.latency_ms.p95|default:"—" }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<div class="lk-empty">No calls.</div>{% endif %}
+    </div>
+    <div>
+      <h2>By model</h2>
+      {% if by_model %}<table><thead><tr><th>Model</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">Spend</th><th class="num">p95 ms</th></tr></thead><tbody>
+      {% for r in by_model %}<tr><td>{{ r.key|default:"(unknown)" }}</td><td class="num">{{ r.calls|num }}</td><td class="num">{{ r.error_rate|pct }}</td><td class="num">${{ r.cost|floatformat:4 }}</td><td class="num">{{ r.latency_ms.p95|default:"—" }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<div class="lk-empty">No calls.</div>{% endif %}
+    </div>
+    <div>
+      <h2>Providers (last 15 min)</h2>
+      {% if providers %}<table><thead><tr><th>Provider</th><th>Circuit</th><th class="num">Calls</th><th class="num">Errors</th><th class="num">p95 ms</th></tr></thead><tbody>
+      {% for p in providers %}<tr><td>{{ p.provider }}</td><td>
+        {% if p.circuit.state == "open" %}<span class="lk-status critical"><span class="dot"></span>Open · retry in {{ p.circuit.retry_in_s }} s</span>
+        {% elif p.circuit.state == "half_open" %}<span class="lk-status warning"><span class="dot"></span>Trying again</span>
+        {% else %}<span class="lk-status good"><span class="dot"></span>Healthy</span>{% endif %}</td>
+        <td class="num">{{ p.calls }}</td><td class="num">{{ p.error_rate|pct }}</td><td class="num">{{ p.latency_ms.p95|default:"—" }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<div class="lk-empty">No calls in the last 15 minutes.</div>{% endif %}
+    </div>
+    <div>
+      <h2>Errors by class</h2>
+      {% if errors %}<table><thead><tr><th>Class</th><th class="num">Calls</th></tr></thead><tbody>
+      {% for e in errors %}<tr><td><a href="../llmcall/?status__exact=error&error_class={{ e.error_class|urlencode }}">{{ e.error_class|default:"other" }}</a></td><td class="num">{{ e.count }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<div class="lk-empty">No errors.</div>{% endif %}
+    </div>
+    <div>
+      <h2>Recent alerts</h2>
+      {% if alerts %}<table><tbody>{% for a in alerts %}<tr><td>{{ a.fired_at|date:"d M H:i" }}</td><td><strong>{{ a.rule.name }}</strong> — {{ a.message }}</td></tr>{% endfor %}</tbody></table>
+      {% else %}<div class="lk-empty">None fired. {% if not rules %}<a href="../alertrule/add/">Add an alert rule</a>.{% endif %}</div>{% endif %}
+    </div>
+    <div>
+      <h2>Catalogue changes to your models (30 days)</h2>
+      {% if changes %}<table><tbody>{% for c in changes %}<tr><td>{{ c.synced_at|date:"d M" }}</td><td>{{ c.provider }}/{{ c.model_id }}</td><td>{{ c.kind }}{% if c.field %}: {{ c.field }} {{ c.old }} → {{ c.new }}{% endif %}</td></tr>{% endfor %}</tbody></table>
+      {% else %}<div class="lk-empty">No changes to models your touchpoints use.</div>{% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

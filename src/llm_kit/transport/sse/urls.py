@@ -5,6 +5,7 @@ For the REST API add ``path("llm/api/", include("llm_kit.transport.api.urls"))``
 
 from django.urls import path
 
+from llm_kit.monitoring.prometheus import metrics
 from llm_kit.transport.sse import views
 
 app_name = "llm_kit"
@@ -12,4 +13,5 @@ app_name = "llm_kit"
 urlpatterns = [
     path("stream/", views.stream, name="stream-new"),
     path("threads/<uuid:thread_id>/stream/", views.stream, name="stream"),
+    path("metrics/", metrics, name="metrics"),
 ]

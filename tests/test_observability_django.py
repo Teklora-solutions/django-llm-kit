@@ -94,3 +94,20 @@ def test_unknown_sink_names_and_otel():
             build_sinks(["otel"])
     else:
         assert type(build_sinks(["otel"])[0]).__name__ == "OTelSink"
+
+
+def test_failing_provider_trips_the_breaker_and_resolution_moves_on(recording, keys, monkeypatch):
+    from llm_kit.core.touchpoints import touchpoint
+    from llm_kit.monitoring.breaker import breaker
+
+    breaker.reset()
+    monkeypatch.setenv("DOWN_API_KEY", "x")
+    tp = touchpoint("tests.flaky", default="down/model", fallbacks=["gemini/gemini-3.8-flash"])
+    for _ in range(5):
+        tp.complete("hi")  # primary fails (ConnectionError), fallback answers
+    assert flush()
+    assert breaker.is_open("down")
+    r = tp.resolve()
+    assert r.model == "gemini/gemini-3.8-flash"
+    assert ("down/model", "provider circuit open (recent failures)") in r.skipped
+    breaker.reset()

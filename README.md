@@ -8,6 +8,7 @@ Use LangGraph and LangChain in Django the Django way. Register a graph in `setti
 - **WebSocket consumer** (Channels): two-way chat, human-in-the-loop resume, and cancel.
 - **Touchpoints**: each place your code calls an LLM declares its model, fallbacks and **who may choose the model** (server or client, within limits) in code. Admins can override this without a deploy.
 - **Observability**: every model call, tool call and run is recorded: tokens, cost (from the catalogue), latency and time to first token, which model actually answered after fallbacks, and classified errors. Stored in your database and logged as JSON; OpenTelemetry is optional.
+- **Monitoring**: spend, errors, latency and provider health as plain Python functions for your own dashboards, the same data as JSON endpoints, an admin dashboard, a per-provider circuit breaker that steers fallbacks, alert rules (email/webhook/signal), `llm_kit_status`, and a Prometheus endpoint.
 - **Model catalogue**: prices, limits and capabilities for ~12,600 models, synced from models.dev, OpenRouter and LiteLLM. Touchpoints are checked against it.
 
 ```
@@ -159,6 +160,34 @@ Every call through a touchpoint, and every graph run started through llm-kit, is
 - **Never slows a call down:** callbacks only enqueue records; a background thread prices and writes them. A failing sink never breaks a call. `llm_kit.observability.flush()` waits for pending writes (tests, scripts).
 - **Sinks** (`RECORD_SINKS`): `"database"` (admin: *LLM calls*, *LLM runs*, *Tool calls*), `"log"` (one JSON line per record on the `llm_kit.calls` logger, never including content), `"otel"` (OpenTelemetry spans with GenAI semantic conventions), or a dotted path to your own class with `write(calls, runs, tools)`.
 
+## Monitoring
+
+Build your own dashboard on the same functions the admin uses. Each returns plain data and takes the same filters: `period` ("24h", "7d"…) or `since`/`until`, plus `touchpoint`, `model`, `provider`, `user`, `tenant`, `graph`, `status`, `chosen_by`.
+
+```python
+from llm_kit import monitoring
+
+monitoring.summary(period="24h")                       # calls, errors, error/fallback rate, tokens, cost, p50/p95/p99 latency, TTFT
+monitoring.timeseries("cost", bucket="day", period="30d", group_by="model")
+monitoring.breakdown("touchpoint", period="7d")        # per key: calls, error rate, cost, p95
+monitoring.errors(period="24h")                        # by class and model, latest messages
+monitoring.top("user", metric="cost", n=10)
+monitoring.provider_health()                           # last 15 min per provider + circuit state
+```
+
+The same data as JSON (staff only unless `MONITORING_PERMISSION` names a DRF permission class): `GET /llm/api/monitoring/{summary,timeseries,breakdown,errors,top,providers,alerts}/?period=7d&touchpoint=…`.
+
+**Admin dashboard** (*LLM Kit → Monitoring dashboard*): headline numbers, spend per day, breakdowns by touchpoint and model, provider health, errors, alerts, and catalogue changes to models your touchpoints use. Light and dark theme.
+
+**Circuit breaker:** each provider's circuit opens after repeated retryable errors (5 in 60 s by default), or at once on an exhausted quota (15 min). While it's open, touchpoint resolution moves that provider's models behind healthy fallbacks. After the cooldown, one call is let through to test it. State is shared through Django's cache, so use Redis/Memcached with several workers. Tune with `CIRCUIT_BREAKER`.
+
+**Alerts** (*Alert rules* in the admin): `spend`, `error_rate`, `latency_p95`, `unpriced_share`, `provider_down`, `catalogue_change` (a touchpoint's model was removed, deprecated or changed price). Each rule takes a window, threshold, filters and cooldown, and delivers by email, a webhook (Slack/Discord-compatible `text`), and the `llm_kit.monitoring.alerts.alert_fired` signal. Run `manage.py llm_kit_check_alerts` every few minutes (Celery: `llm_kit.check_alerts`).
+
+**Operations:**
+- `manage.py llm_kit_status`: catalogue age, open circuits, touchpoint problems, last 24 h. Exits 1 when unhealthy, for cron, CI or health checks.
+- `/llm/metrics/`: Prometheus gauges for the last hour plus circuit state and catalogue age. Needs a staff session or `Authorization: Bearer <METRICS_TOKEN>`.
+- `manage.py llm_kit_prune [--dry-run] [--threads DAYS]`: deletes old calls, runs, tool calls, catalogue changes and alerts, and clears captured content after `CONTENT_RETENTION_DAYS`. Threads are only deleted when you pass `--threads`.
+
 ## Model catalogue
 
 Metadata for ~12,600 models (prices, context limits, capabilities, modalities, release and deprecation dates), synced from **models.dev**, **OpenRouter** and **LiteLLM** into your database:
@@ -269,7 +298,10 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 | `OBSERVABILITY` | `True` | record calls, runs and tool calls |
 | `RECORD_SINKS` | `["database", "log"]` | `database`, `log`, `otel`, or dotted paths |
 | `CAPTURE_CONTENT` | `False` | store prompts/responses (per touchpoint: `capture=`) |
-| `CONTENT_RETENTION_DAYS` / `CALL_RETENTION_DAYS` | `7` / `90` | used by `llm_kit_prune` (phase 5) |
+| `CONTENT_RETENTION_DAYS` / `CALL_RETENTION_DAYS` | `7` / `90` | used by `llm_kit_prune` |
+| `CIRCUIT_BREAKER` | `{}` | `{"failures": 5, "window": 60, "cooldown": 60, "quota_cooldown": 900}` |
+| `MONITORING_PERMISSION` | staff only | dotted DRF permission class for `/llm/api/monitoring/` |
+| `METRICS_TOKEN` | `None` | bearer token for `/llm/metrics/` |
 | `REQUIRE_AUTH` | `True` | |
 | `STREAM_MODES` | `["messages", "updates"]` | LangGraph stream modes used for SSE/WebSocket runs |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |

@@ -39,6 +39,7 @@ class Recorder:
     def __init__(self, max_queue: int = 10_000, batch_size: int = 200, batch_wait: float = 0.2) -> None:
         self.sinks: list[Sink] = []
         self.price_lookup: PriceLookup | None = None
+        self.observers: list[Callable[[CallRecord], None]] = []  # e.g. the circuit breaker
         self._queue: queue.Queue[Record | Callable[[], None]] = queue.Queue(max_queue)
         self._batch_size = batch_size
         self._batch_wait = batch_wait
@@ -50,9 +51,15 @@ class Recorder:
 
     # -------------------------------------------------------------- set-up
 
-    def configure(self, sinks: list[Sink], price_lookup: PriceLookup | None) -> None:
+    def configure(
+        self,
+        sinks: list[Sink],
+        price_lookup: PriceLookup | None,
+        observers: list[Callable[[CallRecord], None]] | None = None,
+    ) -> None:
         self.sinks = list(sinks)
         self.price_lookup = price_lookup
+        self.observers = list(observers or [])
 
     def _ensure_thread(self) -> None:
         if self._thread is not None and self._thread.is_alive() and self._pid == os.getpid():
@@ -70,7 +77,7 @@ class Recorder:
     # ---------------------------------------------------------------- API
 
     def emit(self, record: Record) -> None:
-        if not self.sinks:
+        if not self.sinks and not self.observers:
             return
         self._ensure_thread()
         try:
@@ -119,6 +126,11 @@ class Recorder:
         for r in batch:
             if isinstance(r, CallRecord):
                 self._price(r)
+                for observe in self.observers:
+                    try:
+                        observe(r)
+                    except Exception:
+                        logger.exception("llm-kit call observer failed")
                 calls.append(r)
             elif isinstance(r, RunRecord):
                 cost, unpriced = self._run_costs.pop(r.run_id, [Decimal(0), 0])

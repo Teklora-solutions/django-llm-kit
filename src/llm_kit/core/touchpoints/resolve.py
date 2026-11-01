@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from llm_kit.core.catalogue.fields import normalise_provider
 from llm_kit.core.catalogue.match import unmet
 from llm_kit.core.errors import ModelNotAllowed, TouchpointDisabled
-from llm_kit.core.touchpoints.env import ModelInfo, ResolutionEnv, has_credentials
+from llm_kit.core.touchpoints.env import ModelInfo, ResolutionEnv, has_credentials, provider_of
 from llm_kit.core.touchpoints.policy import ClientChoice, ServerChoice, matches_any
 
 if TYPE_CHECKING:
@@ -138,6 +138,20 @@ def resolve(tp: Touchpoint, requested: str | None, env: ResolutionEnv) -> Resolu
         skipped.append((primary, "no API key configured"))
         notes.append(f"{primary} has no API key; promoted fallback {usable_fallbacks[0]}")
         primary = usable_fallbacks.pop(0)
+
+    # Providers whose circuit is open (recent failures) go to the back of the line.
+    circuit_open = getattr(env, "circuit_open", None)
+    if circuit_open is not None:
+        down = [ref for ref in [primary, *usable_fallbacks] if circuit_open(provider_of(ref))]
+        if down and len(down) <= len(usable_fallbacks):  # at least one healthy candidate remains
+            healthy = [ref for ref in [primary, *usable_fallbacks] if ref not in down]
+            for ref in down:
+                skipped.append((ref, "provider circuit open (recent failures)"))
+            if primary in down:
+                notes.append(f"{primary}: provider circuit open; using {healthy[0]}")
+            primary, usable_fallbacks = healthy[0], healthy[1:]
+        elif down:
+            notes.append("all candidates' provider circuits are open; trying anyway")
 
     return Resolution(
         touchpoint=tp.name,

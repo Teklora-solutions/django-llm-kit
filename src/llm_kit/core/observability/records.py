@@ -25,6 +25,7 @@ class CallRecord:
     requested_model: str = ""
     resolved_model: str = ""  # what resolution picked for the touchpoint
     model: str = ""  # the candidate this attempt used
+    provider: str = ""  # provider part of ``model`` (LiteLLM name)
     served_model: str = ""  # what the provider reports
     chosen_by: str = ""
     fallback_index: int = 0

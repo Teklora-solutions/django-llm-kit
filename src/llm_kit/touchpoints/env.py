@@ -38,6 +38,11 @@ class DjangoEnv:
 
         return api_keys(provider)
 
+    def circuit_open(self, provider: str) -> bool:
+        from llm_kit.monitoring.breaker import breaker
+
+        return breaker.is_open(provider)
+
 
 def invalidate_overrides() -> None:
     _overrides.bump()
