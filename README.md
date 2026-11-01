@@ -462,7 +462,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
 | `REQUIRE_AUTH` | `True` | |
-| `CREDENTIALS` | `None` | Dotted path to `fn(provider) -> secret | [secrets] | None`, asked before stored keys and env vars (a settings object, a vault, a service-account path, OAuth tokens). |
+| `CREDENTIALS` | `None` | Dotted path to `fn(provider)` returning a secret, a list of secrets, or None; asked before stored keys and env vars (a settings object, a vault, a service-account path, OAuth tokens). |
 | `CHECKPOINTER` | `None` | `DjangoSaver`; see [Choosing the checkpointer](#choosing-the-checkpointer). |
 | `ADOPT_SESSION_THREADS` | `True` | Move a visitor's threads to their account when they sign in. |
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes used for SSE/WebSocket runs (`custom` carries subagents' messages) |
