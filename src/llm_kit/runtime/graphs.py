@@ -1,10 +1,11 @@
-"""Django adapter for the graph registry (``LLM_KIT["GRAPHS"]``), using ``DjangoSaver``.
+"""Django adapter for the graph registry (``LLM_KIT["GRAPHS"]`` and declared agents), with ``LLM_KIT["CHECKPOINTER"]``.
 
 See ``llm_kit.core.graphs`` for what a registered target may be.
 """
 
 from __future__ import annotations
 
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.pregel import Pregel
 
 from llm_kit import conf
@@ -14,13 +15,30 @@ from llm_kit.persistence.saver import DjangoSaver
 
 __all__ = ["UnknownGraph", "clear_cache", "default_graph_name", "get_checkpointer", "get_graph", "graph_names"]
 
-_saver: DjangoSaver | None = None
+_saver: BaseCheckpointSaver | None = None
+_saver_setting: str | None = None  # the CHECKPOINTER value _saver was built from
 
 
-def get_checkpointer() -> DjangoSaver:
-    global _saver
-    if _saver is None:
-        _saver = DjangoSaver()
+def build_checkpointer(value) -> BaseCheckpointSaver:
+    """``LLM_KIT["CHECKPOINTER"]``: None/"django" (``DjangoSaver``), "postgres", or anything
+    ``llm_kit.core.checkpointers.build_checkpointer`` accepts."""
+    if value in (None, "django"):
+        return DjangoSaver()
+    from llm_kit.core.checkpointers import build_checkpointer as build
+
+    if value == "postgres":
+        from llm_kit.persistence.postgres import SAVERS
+
+        value = SAVERS
+    return build(value)
+
+
+def get_checkpointer() -> BaseCheckpointSaver:
+    """The checkpointer every graph and agent is compiled with (one per process)."""
+    global _saver, _saver_setting
+    value = conf.get("CHECKPOINTER")
+    if _saver is None or repr(value) != _saver_setting:  # rebuilt only when the setting changes
+        _saver, _saver_setting = build_checkpointer(value), repr(value)
     return _saver
 
 
@@ -56,5 +74,8 @@ def get_graph(name: str | None = None) -> Pregel:
 
 
 def clear_cache() -> None:
-    """Drop compiled graphs, e.g. after changing settings in tests."""
+    """Drop compiled graphs, e.g. after changing settings in tests.
+
+    The checkpointer is kept (it may hold connection pools); it is rebuilt when
+    ``CHECKPOINTER`` changes."""
     registry.clear()

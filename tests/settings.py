@@ -81,3 +81,7 @@ if _pg := os.environ.get("LLM_KIT_TEST_PG"):
         }
     }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Run the suite on LangGraph's Postgres checkpointer with LLM_KIT_TEST_CHECKPOINTER=postgres (needs LLM_KIT_TEST_PG).
+if os.environ.get("LLM_KIT_TEST_CHECKPOINTER"):
+    LLM_KIT["CHECKPOINTER"] = os.environ["LLM_KIT_TEST_CHECKPOINTER"]

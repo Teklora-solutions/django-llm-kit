@@ -363,6 +363,24 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 
 **SQLite:** LangGraph writes checkpoints from worker threads, so set `"OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 20}` (Django 5.1+). The saver works without it, but this avoids "database is locked" under concurrent load.
 
+## Choosing the checkpointer
+
+Every graph and agent uses one checkpointer, set by `LLM_KIT["CHECKPOINTER"]`:
+
+| Value | Meaning |
+|---|---|
+| `None` (default) | `DjangoSaver`: llm-kit's tables, on any database Django supports |
+| `"postgres"` | LangGraph's own `PostgresSaver`/`AsyncPostgresSaver`, on Django's Postgres database (`pip install django-llm-kit[postgres]`). Tables are created on first use |
+| `"myapp.ai:saver"` | a saver instance, a saver class, or a zero-argument factory |
+| `{"sync": "myapp.ai:saver", "async": "myapp.ai:asaver"}` | separate factories for sync and async code; the async one may be a coroutine |
+
+A project that already has an `AsyncPostgresSaver` (as some projects already do) can point at its factory, and its existing threads keep working.
+
+- **One async saver per event loop.** An async connection pool belongs to the loop that opened it. A Celery task that calls `asyncio.run` gets a new loop each time, and a shared saver would fail on the second task. llm-kit makes one async saver per running loop and closes the savers of loops that have finished.
+- **Missing halves are filled in.** A sync-only saver (`PostgresSaver`) is run in a worker thread for async code. An async-only factory serves sync code from one background loop.
+- **Shut down cleanly.** With pooled savers (`"postgres"`, or a sync/async dict), `get_checkpointer().close()` frees the connections.
+- Deleting a `Thread` deletes its state from whichever checkpointer is configured.
+
 ## Agents and subagents
 
 One harness runs every agent. An agent is a declaration: its model (a touchpoint), prompt and tools. A subagent is the same harness with a different declaration, the way Claude Code's subagents are Claude Code with another model, prompt and tool set.
@@ -439,6 +457,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
 | `REQUIRE_AUTH` | `True` | |
+| `CHECKPOINTER` | `None` | `DjangoSaver`; see [Choosing the checkpointer](#choosing-the-checkpointer). |
 | `ADOPT_SESSION_THREADS` | `True` | Move a visitor's threads to their account when they sign in. |
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes used for SSE/WebSocket runs (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |

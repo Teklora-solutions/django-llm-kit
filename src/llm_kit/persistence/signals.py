@@ -9,8 +9,12 @@ from llm_kit.models import Thread
 def delete_thread_checkpoints(sender, instance, using, **kwargs):
     """Deleting a Thread (admin, API, user cascade) also deletes its LangGraph state."""
     from llm_kit.persistence.saver import DjangoSaver
+    from llm_kit.runtime.graphs import get_checkpointer
 
-    DjangoSaver(using=using).delete_thread(instance.thread_id)
+    saver = get_checkpointer()
+    if isinstance(saver, DjangoSaver):
+        saver = DjangoSaver(using=using)  # the database the thread was deleted from
+    saver.delete_thread(instance.thread_id)
 
 
 @receiver(user_logged_in, dispatch_uid="llm_kit_adopt_session_threads")

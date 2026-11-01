@@ -11,6 +11,15 @@ def _fresh_graphs():
     graphs.clear_cache()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _close_checkpointer(django_db_setup):
+    """Pooled checkpointers (CHECKPOINTER="postgres") hold connections; free them before the test DB is dropped."""
+    yield
+    saver = graphs._saver
+    if hasattr(saver, "close"):
+        saver.close()
+
+
 @pytest.fixture(autouse=True)
 def _fresh_cache():
     """Rolled-back test transactions fire no signals, so cached overrides/keys must be reset."""

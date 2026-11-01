@@ -1,7 +1,8 @@
 import pytest
 from rest_framework.test import APIClient
 
-from llm_kit.models import Checkpoint, Thread
+from llm_kit.models import Thread
+from llm_kit.runtime.graphs import get_checkpointer
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -33,9 +34,10 @@ def test_thread_crud_run_state_history(api, user):
     assert api.patch(f"/llm/api/threads/{tid}/", {"title": "Renamed"}, format="json").data["title"] == "Renamed"
     assert api.patch(f"/llm/api/threads/{tid}/", {"graph": "approval"}, format="json").status_code == 400
 
-    assert Checkpoint.objects.filter(thread_id=tid).exists()
+    saved = {"configurable": {"thread_id": tid, "checkpoint_ns": ""}}
+    assert get_checkpointer().get_tuple(saved) is not None  # whichever checkpointer is configured
     assert api.delete(f"/llm/api/threads/{tid}/").status_code == 204
-    assert not Checkpoint.objects.filter(thread_id=tid).exists()  # state deleted with the thread
+    assert get_checkpointer().get_tuple(saved) is None  # state deleted with the thread
 
 
 def test_interrupt_resume_via_api(api):

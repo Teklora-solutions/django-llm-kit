@@ -14,6 +14,9 @@ DEFAULTS: dict[str, Any] = {
     "GRAPHS": {},
     "DEFAULT_GRAPH": None,
     "REQUIRE_AUTH": True,
+    # Checkpointer for every graph: None (DjangoSaver), "postgres" (LangGraph's PostgresSaver on
+    # Django's database), a saver/class/factory (dotted path), or {"sync": ..., "async": ...}.
+    "CHECKPOINTER": None,
     # Move a visitor's threads to their account when they sign in (Django's user_logged_in).
     "ADOPT_SESSION_THREADS": True,
     # Stream modes requested from LangGraph for streamed runs ("custom" carries subagents' messages).
