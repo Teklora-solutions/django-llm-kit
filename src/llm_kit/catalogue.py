@@ -28,10 +28,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 
 from llm_kit import conf
-
-
-class UnknownModel(LookupError):
-    pass
+from llm_kit.core.errors import UnknownModel
 
 
 @dataclass(frozen=True)

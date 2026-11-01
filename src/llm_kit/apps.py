@@ -8,4 +8,4 @@ class LLMKitConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
 
     def ready(self):
-        from llm_kit import signals  # noqa: F401
+        from llm_kit import conf, signals  # noqa: F401  (conf wires settings into llm_kit.core)
