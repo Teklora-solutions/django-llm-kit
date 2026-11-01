@@ -22,7 +22,7 @@ and use them::
 The caller (user + tenant) is always set by the server, never by the model.
 """
 
-from llm_kit.tools.caller import AUTHENTICATED, Caller, caller_for, caller_from
+from llm_kit.tools.caller import AUTHENTICATED, PUBLIC, Caller, caller_for, caller_from
 from llm_kit.tools.registry import (
     ToolEntry,
     ToolSelection,
@@ -39,6 +39,7 @@ from llm_kit.tools.registry import (
 
 __all__ = [
     "AUTHENTICATED",
+    "PUBLIC",
     "Caller",
     "ToolEntry",
     "ToolSelection",

@@ -19,7 +19,7 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.tools import tool as as_tool
 
 from llm_kit.tools import ops
-from llm_kit.tools.caller import _UNSET, CONFIG_KEY, Caller, caller_for, caller_from
+from llm_kit.tools.caller import _UNSET, CONFIG_KEY, PUBLIC, Caller, caller_for, caller_from
 from llm_kit.tools.schemas import find_schema, save_schema
 from llm_kit.tools.scope import scoped
 from llm_kit.tools.spec import PROTECTED_FIELD_NAMES, AccessSpec
@@ -48,11 +48,13 @@ class ToolEntry:
         return caller is not None and any(caller.has_perm(p) for p in self.permissions)
 
     def refusal(self, caller: Caller | None) -> str | None:
-        if caller is None or not caller.is_authenticated:
+        if caller is None:
             return NO_CALLER
-        if not self.allowed(caller):
-            return f"Refused: you don't have permission to use {self.name}."
-        return None
+        if self.allowed(caller):
+            return None
+        if not caller.is_authenticated:
+            return NO_CALLER
+        return f"Refused: you don't have permission to use {self.name}."
 
     def _inner_config(self, caller, config):
         config = dict(config or {})
@@ -126,7 +128,8 @@ def register(
     guidance: str = "",
 ) -> BaseTool:
     """Add a hand-written tool to the catalogue, behind a permission (``"app.codename"``,
-    ``tools.AUTHENTICATED``, or a callable taking the user). Usable as a decorator::
+    ``tools.AUTHENTICATED``, ``tools.PUBLIC`` (anyone, including visitors and runs with no
+    user), or a callable taking the user). Usable as a decorator::
 
         @functools.partial(tools.register, permission="crm.view_lead", category="crm")
         @langchain_core.tools.tool
@@ -135,7 +138,8 @@ def register(
     inner = tool if isinstance(tool, BaseTool) else as_tool(tool)
     if permission is None:
         raise ImproperlyConfigured(
-            f"tool {inner.name!r}: give a permission (tools.AUTHENTICATED for any signed-in user)"
+            f"tool {inner.name!r}: give a permission (tools.AUTHENTICATED for any signed-in user, "
+            "tools.PUBLIC for anyone)"
         )
 
     def add():
@@ -165,6 +169,8 @@ def _when_loaded(fn: Callable[[], None]) -> None:
 
 
 def _add_entry(entry: ToolEntry) -> None:
+    if entry.kind != "custom" and PUBLIC in entry.permissions:
+        raise ImproperlyConfigured(f"tool {entry.name!r}: tools on your models can't be PUBLIC; give a permission")
     if entry.name in _entries:
         raise ImproperlyConfigured(
             f"two tools are named {entry.name!r}; set name= or plural= in one of the declarations"
@@ -304,8 +310,6 @@ def _select(names, categories, kinds) -> Iterable[ToolEntry]:
 
 def entries_for(user, tenant: Any = _UNSET, *, names=None, categories=None, kinds=None) -> list[ToolEntry]:
     caller = caller_for(user, tenant)
-    if not caller.is_authenticated:
-        return []
     return [e for e in _select(names, categories, kinds) if e.allowed(caller)]
 
 

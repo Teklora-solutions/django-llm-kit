@@ -245,19 +245,45 @@ def build(spec: AgentSpec, checkpointer: Any = None, env: AgentEnv | None = None
     )
 
 
+def window(spec: AgentSpec, messages: list) -> list:
+    """The part of the conversation a model call sees: all of it, or the newest ``spec.history``
+    tokens (approximate), starting at a user message so tool calls keep their replies."""
+    if not spec.history or not messages:
+        return list(messages)
+    from langchain_core.messages import trim_messages
+    from langchain_core.messages.utils import count_tokens_approximately
+
+    kept = trim_messages(
+        messages,
+        max_tokens=spec.history,
+        token_counter=count_tokens_approximately,
+        strategy="last",
+        start_on="human",
+        allow_partial=False,
+    )
+    if not kept:  # the latest turn alone is over the limit: send it anyway, from its user message
+        last_human = max((i for i, m in enumerate(messages) if m.type == "human"), default=0)
+        kept = list(messages[last_human:])
+    return kept
+
+
 def _build_model(spec: AgentSpec, get_env) -> StateGraph:
     def model(state, config):
         step = prepare(spec, state, config, get_env())
         if isinstance(step, dict):
             return step
-        reply = step.llm.invoke([SystemMessage(step.prompt), *state["messages"]], step.run_config(config))
+        reply = step.llm.invoke(
+            [SystemMessage(step.prompt), *window(step.spec, state["messages"])], step.run_config(config)
+        )
         return _after_reply(step, reply)
 
     async def amodel(state, config):
         step = await sync_to_async(prepare, thread_sensitive=True)(spec, state, config, get_env())
         if isinstance(step, dict):
             return step
-        reply = await step.llm.ainvoke([SystemMessage(step.prompt), *state["messages"]], step.run_config(config))
+        reply = await step.llm.ainvoke(
+            [SystemMessage(step.prompt), *window(step.spec, state["messages"])], step.run_config(config)
+        )
         return _after_reply(step, reply)
 
     def tools(state, config):
@@ -352,7 +378,7 @@ _SHAPE = "Put your final answer above into the required structure. Use only what
 
 
 def _structured_messages(step: Step, state) -> list:
-    return [SystemMessage(step.prompt), *state["messages"], HumanMessage(_SHAPE)]
+    return [SystemMessage(step.prompt), *window(step.spec, state["messages"]), HumanMessage(_SHAPE)]
 
 
 def _structured_answer(llm, step: Step, state, config) -> Any:

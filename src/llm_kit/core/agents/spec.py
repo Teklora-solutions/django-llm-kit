@@ -64,6 +64,7 @@ class AgentSpec:
     fork: bool = False
     defer_tools: bool = False
     essential: tuple[str, ...] = ()  # with defer_tools: the tools bound from the start
+    history: int | None = None  # tokens of conversation sent to the model (newest kept); None = all
     code: Callable[..., Any] | None = None
     paused: str = ""  # set by an override; see ``with_override``
     allowed_tools: frozenset[str] | None = None  # set by an override: only these tool names
@@ -81,6 +82,8 @@ class AgentSpec:
             raise ConfigError(f"Agent {self.name!r} lists itself as a subagent.")
         if self.max_steps < 1:
             raise ConfigError(f"Agent {self.name!r}: max_steps must be at least 1.")
+        if self.history is not None and self.history < 1:
+            raise ConfigError(f"Agent {self.name!r}: history must be a positive number of tokens, or None.")
         if self.output is not None and not (isinstance(self.output, type) and issubclass(self.output, BaseModel)):
             raise ConfigError(f"Agent {self.name!r}: output must be a pydantic model class.")
         if self.code is not None:
@@ -163,6 +166,7 @@ def agent(
     fork: bool = False,
     defer_tools: bool = False,
     essential: Sequence[str] = (),
+    history: int | None = None,
 ) -> AgentSpec:
     """Declare and register an agent run by the shared harness. Re-declaring a name replaces it.
 
@@ -178,6 +182,8 @@ def agent(
         max_steps: model calls per turn; on the last one it is told to answer.
         fork: as a subagent, start from a copy of the parent's conversation instead of only the task.
         defer_tools: bind only ``essential`` tools plus ``find_tools``; the rest load when found.
+        history: about how many tokens of the conversation each model call sees, newest first,
+            always starting at a user message (the checkpoint keeps everything). None: all of it.
     """
     tp_name = getattr(touchpoint, "name", touchpoint)
     return _register(
@@ -193,6 +199,7 @@ def agent(
             fork=fork,
             defer_tools=defer_tools,
             essential=tuple(essential),
+            history=history,
         )
     )
 

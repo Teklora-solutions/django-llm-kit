@@ -15,3 +15,12 @@ def whoami(config: RunnableConfig) -> str:
 
 
 tools.register(whoami, permission=tools.AUTHENTICATED, category="testapp", guidance="- `whoami` says who you are.")
+
+
+@tool
+def opening_hours() -> str:
+    """When the office is open."""
+    return "Mon-Fri 9-5"
+
+
+tools.register(opening_hours, permission=tools.PUBLIC, category="public")

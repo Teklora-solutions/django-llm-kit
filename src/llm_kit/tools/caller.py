@@ -15,8 +15,11 @@ from llm_kit.core.graphs import import_target
 
 CONFIG_KEY = "__llm_kit_caller"
 
-# Permission meaning "any signed-in user" (for hand-written tools). Anonymous callers never get tools.
+# Permission meaning "any signed-in user" (for hand-written tools).
 AUTHENTICATED = "__authenticated__"
+# Permission meaning "anyone": anonymous visitors and runs with no user (a Celery task). Only for
+# hand-written tools that read public data (site search, the time); never for tools on your models.
+PUBLIC = "__public__"
 
 _UNSET: Any = object()
 
@@ -39,6 +42,8 @@ class Caller:
         return getattr(self.tenant, "pk", self.tenant)
 
     def has_perm(self, permission) -> bool:
+        if permission == PUBLIC:
+            return True
         if not self.is_authenticated or getattr(self.user, "is_active", True) is False:
             return False
         if permission == AUTHENTICATED:

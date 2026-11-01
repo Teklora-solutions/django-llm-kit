@@ -94,11 +94,12 @@ def test_catalogue_filtered_by_permission(world):
     } <= names
     assert "save_product" not in names and not any(n.startswith("delete") for n in names)
     assert {t.name for t in tools.for_user(world["alice"])} >= {"find_customers", "save_invoice", "whoami"}
-    assert [t.name for t in tools.for_user(world["carol"])] == ["whoami"]
-    assert tools.for_user(None) == []
+    assert [t.name for t in tools.for_user(world["carol"])] == ["whoami", "opening_hours"]
+    # Without a user, only tools registered as tools.PUBLIC.
+    assert [t.name for t in tools.for_user(None)] == ["opening_hours"]
     from django.contrib.auth.models import AnonymousUser
 
-    assert tools.for_user(AnonymousUser()) == []
+    assert [t.name for t in tools.for_user(AnonymousUser())] == ["opening_hours"]
     assert [t.name for t in tools.for_user(world["alice"], kinds=["find"], categories=["auth"])] == ["find_accounts"]
     text = tools.guidance(tools.for_user(world["alice"], names=["find_customers", "whoami"]))
     assert "`find_customers`" in text and "`whoami` says who you are" in text
@@ -320,7 +321,7 @@ def test_api_catalogue_and_proposals(world):
     listed = {t["name"]: t for t in api.get("/llm/api/tools/").data}
     assert listed["save_invoice"]["writes"] == "direct" and listed["save_note"]["writes"] == "approval"
     assert "status" in listed["find_invoices"]["parameters"]["properties"]
-    assert [t["name"] for t in api.get("/llm/api/tools/?kind=custom").data] == ["whoami"]
+    assert [t["name"] for t in api.get("/llm/api/tools/?kind=custom").data] == ["whoami", "opening_hours"]
 
     tool(world["alice"], "save_note").invoke({"text": "via api"})
     pending = api.get("/llm/api/tools/proposals/").data
@@ -350,4 +351,4 @@ def test_command(world):
     assert "find_invoices" in out.getvalue() and "scope: tenant=organisation" in out.getvalue()
     out = StringIO()
     call_command("llm_kit_tools", "--user", "carol", stdout=out)
-    assert out.getvalue().startswith("1 tool(s) for carol")
+    assert out.getvalue().startswith("2 tool(s) for carol")

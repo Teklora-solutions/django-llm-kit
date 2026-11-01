@@ -211,6 +211,7 @@ For models you can't edit, put the same options in `<app>/agent_tools.py` (impor
 ```python
 tools.expose(User, fields=["username", "first_name"], owner_field="pk", name="account", plural="accounts")
 tools.register(my_langchain_tool, permission="crm.view_lead", category="crm")   # hand-written tools join the catalogue
+tools.register(site_search, permission=tools.PUBLIC, category="site")            # anyone: visitors, and runs with no user
 ```
 
 **Using them:**
@@ -428,6 +429,8 @@ def weekly_report(task, ctx):                         # Python instead of a mode
   - `AGENT_MAX_DELEGATIONS` (8) hand-offs in total.
   - `AGENT_TIMEOUT` (300 s) before no new model call starts.
   - No agent can hand work to itself or to an agent above it.
+- **History window:** `history=2000` sends each model call only the newest ~2000 tokens of the conversation, starting at a user message. The checkpoint still keeps everything.
+- **Public tools:** a tool registered with `permission=tools.PUBLIC` is offered to anonymous visitors and to runs with no user (a Celery task). Use it only for tools that read public data. Tools generated from your models can't be public.
 - **Loading tools on demand:** `defer_tools=True, essential=[...]` binds only the essential tools plus `find_tools`. Tools it finds are bound from the next step and stay loaded in the thread.
 - **Admin overrides** (*Agent overrides*): append to or replace the prompt, lower `max_steps`, narrow the tools, or pause an agent. They narrow the declaration in code, never widen it. Change an agent's model through its touchpoint override.
 - **Recording:** every call and run carries its agent. A subagent's run links to its parent (`parent_run_id`, `depth`). The request's run counts every call under it, so its cost includes its subagents. The admin shows the run tree, and monitoring filters and breaks down by `agent`.

@@ -483,3 +483,53 @@ def test_run_tree_in_the_admin(admin_client):
     assert "tests.assistant</a>" in page and "tests.researcher</a>" in page and "(this run)" in page
     listing = admin_client.get("/admin/llm_kit/llmrun/").content.decode()
     assert "↳ tests.researcher (depth 1)" in listing
+
+
+# ----------------------------------------------------- public tools, history
+
+
+def test_public_tools_reach_visitors_and_runs_without_a_user(temp_agents, scripts, world):
+    from llm_kit.tools import registry as tool_registry
+
+    temp_agents("t.front", tools=tools_select_public(), touchpoint="tests.helper")
+    scripts[H] = ["ok", "ok", "ok"]
+    agents.run("t.front", "hours?")  # a Celery-style run: no user
+    assert seen(H)[-1]["tools"] == ["opening_hours"]
+    from django.contrib.auth.models import AnonymousUser
+
+    agents.run("t.front", "hours?", user=AnonymousUser())
+    assert seen(H)[-1]["tools"] == ["opening_hours"]
+    # Anyone gets public tools, and only those: carol (no permissions) gets whoami too.
+    assert [e.name for e in tool_registry.entries_for(None)] == ["opening_hours"]
+    assert {"opening_hours", "whoami"} <= {e.name for e in tool_registry.entries_for(world["carol"])}
+
+
+def test_model_tools_cannot_be_public():
+    from django.core.exceptions import ImproperlyConfigured
+
+    from llm_kit.tools import registry as tool_registry
+    from llm_kit.tools.caller import PUBLIC
+
+    entry = tool_registry.ToolEntry("x", "x", "c", "find", (PUBLIC,), None)
+    with pytest.raises(ImproperlyConfigured, match="can't be PUBLIC"):
+        tool_registry._add_entry(entry)
+
+
+def test_history_limits_what_the_model_sees_not_what_is_kept(temp_agents, scripts):
+    temp_agents("t.short", history=60, touchpoint="tests.helper")
+    scripts[H] = ["first answer " * 10, "second answer " * 10, "third"]
+    thread = "short-1"
+    agents.run("t.short", "first question " * 10, thread_id=thread)
+    agents.run("t.short", "second question " * 10, thread_id=thread)
+    agents.run("t.short", "third question", thread_id=thread)
+    sent = [m.content for m in seen(H)[-1]["messages"] if m.type != "system"]
+    assert not any("first question" in c for c in sent)  # trimmed away
+    assert sent[-1] == "third question"
+    state = get_graph("t.short").get_state({"configurable": {"thread_id": thread}})
+    assert len(state.values["messages"]) == 6  # the checkpoint keeps everything
+
+
+def tools_select_public():
+    from llm_kit import tools
+
+    return tools.select(categories=["public"])
