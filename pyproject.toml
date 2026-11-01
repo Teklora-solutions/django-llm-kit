@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "django-llm-kit"
+version = "0.1.0"
+description = "Drop-in LangGraph & LangChain integration for Django: ORM checkpointer, streaming views, DRF API, Channels consumer and a model catalogue."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Jordan Mwinuka", email = "jordanmwinuka@gmail.com" }]
+classifiers = [
+    "Framework :: Django",
+    "Framework :: Django :: 5.0",
+    "Framework :: Django :: 5.2",
+    "Programming Language :: Python :: 3",
+]
+dependencies = [
+    "django>=5.0",
+    "langgraph>=1.0",
+    "langgraph-checkpoint>=4.0",
+    "langchain>=1.0",
+    "langchain-core>=1.0",
+]
+
+[project.optional-dependencies]
+drf = ["djangorestframework>=3.15"]
+channels = ["channels>=4.0"]
+all = ["djangorestframework>=3.15", "channels>=4.0"]
+dev = [
+    "djangorestframework>=3.15",
+    "channels>=4.0",
+    "daphne>=4.0",
+    "pytest>=8",
+    "pytest-django>=4.8",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_kit"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+src = ["src", "."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

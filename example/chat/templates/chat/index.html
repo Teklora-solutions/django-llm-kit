@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>llm-kit demo</title>
+<style>
+  :root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1d1b; --muted:#6b6a65; --line:#e3e1db; --accent:#2f5d50; --user:#e8efe9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --panel:#1f1f1d; --ink:#ecebe6; --muted:#9a9890; --line:#33322f; --accent:#7fb8a4; --user:#24302b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px; display:flex; flex-direction:column; height:100vh; }
+  header { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:16px; }
+  h1 { font-size:18px; margin:0; }
+  .meta { color:var(--muted); font-size:13px; }
+  .meta code { font-size:12px; }
+  #log { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px; padding:4px 0 16px; }
+  .msg { padding:10px 14px; border-radius:10px; max-width:85%; white-space:pre-wrap; border:1px solid var(--line); background:var(--panel); }
+  .human { align-self:flex-end; background:var(--user); }
+  .tool { font-size:13px; color:var(--muted); background:transparent; border-style:dashed; }
+  .error { border-color:#c0483b; color:#c0483b; }
+  form { display:flex; gap:8px; border-top:1px solid var(--line); padding-top:12px; }
+  input, select, button { font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px; }
+  input { flex:1; min-width:0; }
+  button { background:var(--accent); color:var(--bg); border-color:var(--accent); cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>llm-kit demo</h1>
+    <span class="meta">thread <code id="thread">new</code></span>
+    <span class="meta" style="margin-left:auto"><a href="/admin/" style="color:inherit">admin</a> · <a href="/llm/api/" style="color:inherit">api</a></span>
+  </header>
+  <div id="log"></div>
+  <form id="form">
+    <select id="model" aria-label="Model"><option value="">default model</option></select>
+    <input id="text" placeholder="Ask something…" autocomplete="off" required>
+    <button id="send">Send</button>
+  </form>
+</main>
+<script>
+const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+const log = document.getElementById("log");
+let threadId = null;
+
+fetch("/llm/api/models/").then(r => r.ok ? r.json() : []).then(models => {
+  for (const m of models) document.getElementById("model").add(new Option(`${m.name} · ${m.model}`, m.name));
+});
+
+function bubble(cls, text = "") {
+  const el = document.createElement("div");
+  el.className = `msg ${cls}`;
+  el.textContent = text;
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+
+// Parse a fetch() body as Server-Sent Events.
+async function* sse(response) {
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return;
+    buf += value;
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = {};
+      for (const line of block.split("\n")) {
+        if (line.startsWith(":")) continue;
+        const [k, ...v] = line.split(": "); ev[k] = v.join(": ");
+      }
+      if (ev.event) yield { event: ev.event, data: JSON.parse(ev.data) };
+    }
+  }
+}
+
+document.getElementById("form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const input = document.getElementById("text"), send = document.getElementById("send");
+  const message = input.value.trim(); if (!message) return;
+  input.value = ""; send.disabled = true;
+  bubble("human", message);
+  const url = threadId ? `/llm/threads/${threadId}/stream/` : "/llm/stream/";
+  const model = document.getElementById("model").value || undefined;
+  const bubbles = {};
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrf },
+      body: JSON.stringify({ message, model }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    for await (const { event, data } of sse(res)) {
+      if (event === "thread") { threadId = data.id; document.getElementById("thread").textContent = threadId.slice(0, 8); }
+      if (event === "token" && data.message.content) {
+        const id = data.message.id;
+        bubbles[id] ??= bubble("ai");
+        const c = data.message.content;
+        bubbles[id].textContent += typeof c === "string" ? c : c.map(b => b.text ?? "").join("");
+        log.scrollTop = log.scrollHeight;
+      }
+      if (event === "update" && data.tools) {
+        for (const m of data.tools.messages) bubble("tool", `🔧 ${m.name} → ${m.content}`);
+      }
+      if (event === "error") bubble("error", data.message);
+    }
+  } catch (err) {
+    bubble("error", err.message);
+  } finally {
+    send.disabled = false; input.focus();
+  }
+});
+</script>
+</body>
+</html>
