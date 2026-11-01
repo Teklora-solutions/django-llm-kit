@@ -248,7 +248,7 @@ Public functions: `get_chat_model`, `aget_chat_model`, `model_from_config`, `amo
 | `DEFAULT_MODEL` | `None` | id or alias used when nothing else matches |
 | `MODELS` | `{}` | static aliases |
 | `REQUIRE_AUTH` | `True` | see §6.5 |
-| `STREAM_MODES` | `["messages", "updates"]` | LangGraph stream modes |
+| `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds; `0` turns keep-alives off |
 
 ---

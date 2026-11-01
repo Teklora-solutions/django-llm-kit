@@ -14,3 +14,12 @@ assistant = touchpoint(
         max_price_input=5,  # USD per 1M input tokens
     ),
 )
+
+researcher = touchpoint(
+    "chat.researcher",
+    description="The read-only researcher the assistant hands questions to.",
+    default="gemini/gemini-3.8-flash",
+    fallbacks=["anthropic/claude-haiku-5-5"],
+    params={"max_tokens": 1024},
+    requires={"tool_call": True},
+)

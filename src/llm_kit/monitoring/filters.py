@@ -11,7 +11,7 @@ from django.utils.dateparse import parse_datetime
 
 _PERIOD = re.compile(r"^(\d+)\s*([mhdw])$")
 _UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
-FILTER_FIELDS = ("touchpoint", "model", "provider", "user", "tenant", "graph", "status", "chosen_by")
+FILTER_FIELDS = ("touchpoint", "model", "provider", "user", "tenant", "graph", "agent", "status", "chosen_by")
 
 
 def parse_period(value: str | timedelta | None) -> timedelta:
@@ -62,8 +62,10 @@ class Window:
     def runs(self):
         from llm_kit.models import LLMRun
 
-        allowed = {k: v for k, v in self.filters.items() if k in ("user", "tenant", "graph", "status")}
-        return LLMRun.objects.filter(started_at__gte=self.since, started_at__lt=self.until, **allowed)
+        allowed = {k: v for k, v in self.filters.items() if k in ("user", "tenant", "graph", "agent", "status")}
+        qs = LLMRun.objects.filter(started_at__gte=self.since, started_at__lt=self.until, **allowed)
+        # Requests, not their subagents' runs (already inside them), unless asking about one agent.
+        return qs if "agent" in allowed else qs.filter(parent_run_id__isnull=True)
 
     def as_dict(self) -> dict:
         return {"since": self.since.isoformat(), "until": self.until.isoformat(), **self.filters}

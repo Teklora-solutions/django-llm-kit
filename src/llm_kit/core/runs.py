@@ -10,7 +10,7 @@ Request payload (JSON), all keys optional:
 
 Every run yields events ``{"event": name, "data": json-able}``:
 
-    token      streamed AI message chunk   {"node", "message": {id, type, content, ...}}
+    token      streamed AI message chunk   {"node", "message": {id, type, content, ...}, "agent"?, "depth"?}
     message    complete message from a node
     update     node state update           {"<node>": {...}}
     interrupt  graph paused for input      {"interrupts": [{"id", "value"}]}
@@ -30,6 +30,8 @@ from langgraph.types import Command
 from llm_kit.core import config as settings
 from llm_kit.core.errors import BadRequest
 from llm_kit.core.serialize import message_to_json, state_to_json, to_json
+
+SUBAGENT_EVENT = "llm_kit_subagent"  # custom stream events carrying a subagent's messages
 
 __all__ = ["BadRequest", "astream_run", "build_config", "build_input", "error_message", "invoke_run"]
 
@@ -93,9 +95,21 @@ async def astream_run(graph, input: Any, config: dict[str, Any]) -> AsyncIterato
         async for mode, chunk in graph.astream(input, config, stream_mode=modes):
             if mode == "messages":
                 msg, meta = chunk
+                data = {"node": meta.get("langgraph_node"), "message": message_to_json(msg, compact=True)}
+                if meta.get("llm_kit_agent"):  # agents label their tokens; subagents' have depth > 0
+                    data["agent"] = meta["llm_kit_agent"]
+                    data["depth"] = int(meta.get("llm_kit_depth") or 0)
+                yield {"event": "token" if isinstance(msg, AIMessageChunk) else "message", "data": data}
+            elif mode == "custom" and isinstance(chunk, dict) and chunk.get(SUBAGENT_EVENT):
+                msg = chunk["message"]
                 yield {
                     "event": "token" if isinstance(msg, AIMessageChunk) else "message",
-                    "data": {"node": meta.get("langgraph_node"), "message": message_to_json(msg, compact=True)},
+                    "data": {
+                        "node": chunk.get("node"),
+                        "message": message_to_json(msg, compact=True),
+                        "agent": chunk.get("agent"),
+                        "depth": chunk.get("depth", 0),
+                    },
                 }
             elif mode == "updates":
                 if "__interrupt__" in chunk:

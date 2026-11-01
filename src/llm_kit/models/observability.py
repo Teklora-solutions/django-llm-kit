@@ -14,6 +14,7 @@ class LLMCall(models.Model):
     run_id = models.UUIDField(null=True, blank=True, db_index=True)
     started_at = models.DateTimeField(db_index=True)
     touchpoint = models.CharField(max_length=200, blank=True)
+    agent = models.CharField(max_length=200, blank=True)
     graph = models.CharField(max_length=100, blank=True)
     node = models.CharField(max_length=200, blank=True)
     thread_id = models.CharField(max_length=255, blank=True, db_index=True)
@@ -57,6 +58,7 @@ class LLMCall(models.Model):
             models.Index(fields=["user", "-started_at"]),
             models.Index(fields=["tenant", "-started_at"]),
             models.Index(fields=["status", "-started_at"]),
+            models.Index(fields=["agent", "-started_at"]),
         ]
 
     def __str__(self) -> str:
@@ -64,13 +66,17 @@ class LLMCall(models.Model):
 
 
 class LLMRun(models.Model):
-    """One top-level invocation: a graph run or a touchpoint ``complete()``."""
+    """One top-level invocation (a graph run or a touchpoint ``complete()``), or a subagent's run
+    inside one (``parent_run_id`` set). A request's run includes its subagents' calls and cost."""
 
     run_id = models.UUIDField(unique=True)
     name = models.CharField(max_length=200)
     started_at = models.DateTimeField(db_index=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     graph = models.CharField(max_length=100, blank=True)
+    agent = models.CharField(max_length=200, blank=True)
+    parent_run_id = models.UUIDField(null=True, blank=True, db_index=True)  # set on a subagent's run
+    depth = models.PositiveSmallIntegerField(default=0)
     thread_id = models.CharField(max_length=255, blank=True, db_index=True)
     user = models.CharField(max_length=255, blank=True)
     tenant = models.CharField(max_length=255, blank=True)
@@ -88,7 +94,11 @@ class LLMRun(models.Model):
     class Meta:
         ordering = ["-started_at"]
         verbose_name = "LLM run"
-        indexes = [models.Index(fields=["graph", "-started_at"]), models.Index(fields=["user", "-started_at"])]
+        indexes = [
+            models.Index(fields=["graph", "-started_at"]),
+            models.Index(fields=["user", "-started_at"]),
+            models.Index(fields=["agent", "-started_at"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.name} @ {self.started_at:%Y-%m-%d %H:%M:%S}"

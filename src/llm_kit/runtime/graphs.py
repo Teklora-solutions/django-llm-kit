@@ -24,8 +24,15 @@ def get_checkpointer() -> DjangoSaver:
     return _saver
 
 
+def _targets() -> dict:
+    """Declared agents are graphs by name, alongside ``LLM_KIT["GRAPHS"]``."""
+    from llm_kit.agents.registry import graph_targets
+
+    return {**graph_targets(), **conf.get("GRAPHS")}
+
+
 registry = GraphRegistry(
-    targets=lambda: conf.get("GRAPHS"),
+    targets=_targets,
     checkpointer=get_checkpointer,
     default=lambda: conf.get("DEFAULT_GRAPH"),
 )

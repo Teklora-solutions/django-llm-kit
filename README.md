@@ -346,6 +346,58 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 
 **SQLite:** LangGraph writes checkpoints from worker threads, so set `"OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 20}` (Django 5.1+). The saver works without it, but this avoids "database is locked" under concurrent load.
 
+## Agents and subagents
+
+One harness runs every agent. An agent is a declaration: its model (a touchpoint), prompt and tools. A subagent is the same harness with a different declaration, the way Claude Code's subagents are Claude Code with another model, prompt and tool set.
+
+```python
+# myapp/agents.py  (imported automatically at startup)
+from llm_kit import agent, tools
+
+agent(
+    "crm.assistant",
+    description="Answers staff questions about customers and invoices.",
+    touchpoint="crm.assistant",                       # model policy, client choice, fallbacks, overrides
+    prompt="You help {user}. Today is {date}.",       # template ({date} {now} {user} {tenant} {agent}) or fn(ctx)
+    tools=[current_time, tools.select(categories=["crm"])],
+    subagents=["crm.researcher"],
+    max_steps=12,
+)
+
+agent(
+    "crm.researcher",
+    description="Looks through invoices to answer one question; reports facts with ids. Changes nothing.",
+    touchpoint="crm.cheap",                           # another model
+    prompt="Answer the task from the records. Quote ids.",
+    tools=tools.select(kinds=["find"]),               # read-only
+    output=ResearchReport,                            # optional pydantic shape for the answer
+)
+
+@agent.code("crm.weekly_report", description="Builds the weekly report.", subagents=["crm.researcher"])
+def weekly_report(task, ctx):                         # Python instead of a model loop
+    facts = ctx.run("crm.researcher", "What was invoiced this week?")
+    return facts.output
+```
+
+- **Every agent is a graph by its name.** `/llm/stream/` with `{"graph": "crm.assistant"}`, threads, the WebSocket and the model picker work without listing it in `GRAPHS`.
+- **From code:** `llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)` returns an `AgentResult` (`text`, `output`, `steps`, `stopped`, tokens). `arun` and `stream` too.
+- **The loop:** model → tools → model, until the model answers or reaches `max_steps`; on its last step it is told to answer. Each step reads the declaration and admin overrides again.
+- **Tools** are always limited to what the caller may use. The tool node refuses any call outside the agent's own set, so a parent's tools never reach a subagent.
+- **Handing work over:**
+  - An agent with `subagents` gets one `delegate(agent, task)` tool.
+  - The subagent runs as the same user, on its own checkpointed thread `<thread>/<agent>/<call id>`. It sees only the task, or the parent's conversation with `fork=True`.
+  - Its answer (or `output` as JSON) is the tool result.
+  - Its messages stream to the client with `agent` and `depth` set on `token`/`message` events.
+- **Limits per request:**
+  - `AGENT_MAX_DEPTH` (2) for how deep subagents nest.
+  - `AGENT_MAX_DELEGATIONS` (8) hand-offs in total.
+  - `AGENT_TIMEOUT` (300 s) before no new model call starts.
+  - No agent can hand work to itself or to an agent above it.
+- **Loading tools on demand:** `defer_tools=True, essential=[...]` binds only the essential tools plus `find_tools`. Tools it finds are bound from the next step and stay loaded in the thread.
+- **Admin overrides** (*Agent overrides*): append to or replace the prompt, lower `max_steps`, narrow the tools, or pause an agent. They narrow the declaration in code, never widen it. Change an agent's model through its touchpoint override.
+- **Recording:** every call and run carries its agent. A subagent's run links to its parent (`parent_run_id`, `depth`). The request's run counts every call under it, so its cost includes its subagents. The admin shows the run tree, and monitoring filters and breaks down by `agent`.
+- **Checked at startup:** unknown subagents, touchpoints or tool names, agents that delegate in a circle, and names that clash with `GRAPHS`. Run `manage.py llm_kit_agents [--user name]` to list agents and the tools a user gets.
+
 ## Settings
 
 | Key | Default | |
@@ -366,8 +418,11 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 | `MONITORING_PERMISSION` | staff only | dotted DRF permission class for `/llm/api/monitoring/` |
 | `METRICS_TOKEN` | `None` | bearer token for `/llm/metrics/` |
 | `TENANT_RESOLVER` | `None` | dotted path to `fn(user) -> tenant` for model tools (and call records) |
+| `AGENT_MAX_DEPTH` | `2` | how deep subagents may nest (`0`: no delegation) |
+| `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
+| `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
 | `REQUIRE_AUTH` | `True` | |
-| `STREAM_MODES` | `["messages", "updates"]` | LangGraph stream modes used for SSE/WebSocket runs |
+| `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes used for SSE/WebSocket runs (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |
 
 ## Example project
@@ -378,7 +433,7 @@ python manage.py migrate
 ANTHROPIC_API_KEY=… python manage.py runserver        # or LLM_KIT_DEMO_OFFLINE=1 for an echo model
 ```
 
-Open http://localhost:8000 for a streaming chat page with a model picker and a tool-calling graph.
+Open http://localhost:8000 for a streaming chat page with a model picker. It runs the `chat.assistant` agent (`example/chat/agents.py`), which hands questions about your notes to a read-only `chat.researcher` on another model. Offline, a message containing "research" shows the hand-off. The hand-built graph in `chat/graphs.py` is still registered as `assistant`.
 
 ## Development
 

@@ -1,7 +1,7 @@
 """Aggregations over recorded calls. Every function takes the same filters:
 
 ``period`` ("24h", "7d"…) or ``since``/``until`` (ISO datetimes), plus any of
-touchpoint, model, provider, user, tenant, graph, status, chosen_by.
+touchpoint, model, provider, user, tenant, graph, agent, status, chosen_by.
 """
 
 from __future__ import annotations
@@ -15,7 +15,18 @@ from django.db.models.functions import TruncDay, TruncHour, TruncWeek
 from llm_kit.monitoring.filters import Window
 
 METRICS = ("calls", "errors", "cost", "input_tokens", "output_tokens", "fallbacks")
-BREAKDOWN_KEYS = ("touchpoint", "model", "provider", "user", "tenant", "graph", "chosen_by", "error_class", "node")
+BREAKDOWN_KEYS = (
+    "touchpoint",
+    "model",
+    "provider",
+    "user",
+    "tenant",
+    "graph",
+    "agent",
+    "chosen_by",
+    "error_class",
+    "node",
+)
 BUCKETS = {"hour": TruncHour, "day": TruncDay, "week": TruncWeek}
 PERCENTILE_SAMPLE = 50_000  # latencies fetched to compute percentiles in Python (portable across databases)
 

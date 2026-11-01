@@ -20,6 +20,8 @@
   .msg { padding:10px 14px; border-radius:10px; max-width:85%; white-space:pre-wrap; border:1px solid var(--line); background:var(--panel); }
   .human { align-self:flex-end; background:var(--user); }
   .tool { font-size:13px; color:var(--muted); background:transparent; border-style:dashed; }
+  .sub { margin-left:28px; font-size:14px; border-left:3px solid var(--accent); }
+  .sub .who, .tool .who { display:block; font-size:12px; color:var(--muted); margin-bottom:2px; }
   .error { border-color:#c0483b; color:#c0483b; }
   form { display:flex; gap:8px; border-top:1px solid var(--line); padding-top:12px; }
   input, select, button { font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:9px 12px; }
@@ -56,14 +58,20 @@ fetch("/llm/api/touchpoints/chat.assistant/models/").then(r => r.ok ? r.json() :
   }
 });
 
-function bubble(cls, text = "") {
+function bubble(cls, text = "", who = "") {
   const el = document.createElement("div");
   el.className = `msg ${cls}`;
-  el.textContent = text;
+  if (who) { const w = document.createElement("span"); w.className = "who"; w.textContent = who; el.append(w); }
+  const body = document.createElement("span");
+  body.textContent = text;
+  el.append(body);
+  el.body = body;
   log.append(el);
   log.scrollTop = log.scrollHeight;
   return el;
 }
+
+const textOf = c => typeof c === "string" ? c : c.map(b => b.text ?? "").join("");
 
 // Parse a fetch() body as Server-Sent Events.
 async function* sse(response) {
@@ -104,12 +112,18 @@ document.getElementById("form").addEventListener("submit", async (e) => {
     if (!res.ok) throw new Error((await res.json()).detail);
     for await (const { event, data } of sse(res)) {
       if (event === "thread") { threadId = data.id; document.getElementById("thread").textContent = threadId.slice(0, 8); }
+      // Subagents' messages arrive labelled: data.agent, data.depth > 0.
+      const sub = (data && data.depth) > 0, who = sub ? `↳ ${data.agent}` : "";
       if (event === "token" && data.message.content) {
         const id = data.message.id;
-        bubbles[id] ??= bubble("ai");
-        const c = data.message.content;
-        bubbles[id].textContent += typeof c === "string" ? c : c.map(b => b.text ?? "").join("");
+        bubbles[id] ??= bubble(sub ? "ai sub" : "ai", "", who);
+        bubbles[id].body.textContent += textOf(data.message.content);
         log.scrollTop = log.scrollHeight;
+      }
+      if (event === "message" && sub) {
+        const m = data.message;
+        if (m.type === "tool") bubble("tool sub", `🔧 ${m.name} → ${textOf(m.content).slice(0, 300)}`, who);
+        else if (m.type === "ai" && m.content && !bubbles[m.id]) bubbles[m.id] = bubble("ai sub", textOf(m.content), who);
       }
       if (event === "update" && data.tools) {
         for (const m of data.tools.messages) bubble("tool", `🔧 ${m.name} → ${m.content}`);

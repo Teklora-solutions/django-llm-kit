@@ -57,7 +57,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 LLM_KIT = {
     # The graph's "touchpoint" is the policy a client's "model" choice is checked against.
+    # A hand-built graph. Agents in chat/agents.py are graphs too, by name (chat.assistant, chat.researcher).
     "GRAPHS": {"assistant": {"graph": "chat.graphs:builder", "touchpoint": "chat.assistant"}},
+    "DEFAULT_GRAPH": "chat.assistant",
     # Demo only: lets you try the page without logging in. Keep True in real apps.
     "REQUIRE_AUTH": False,
 }

@@ -38,6 +38,11 @@ def message_to_json(msg: BaseMessage, compact: bool = False) -> dict[str, Any]:
             out["tool_call_chunks"] = to_json(msg.tool_call_chunks)
         if getattr(msg, "tool_calls", None):
             out["tool_calls"] = to_json(msg.tool_calls)
+        if msg.type == "tool":  # which tool replied, and whether it failed
+            out["name"] = getattr(msg, "name", None)
+            out["tool_call_id"] = getattr(msg, "tool_call_id", None)
+            if getattr(msg, "status", "success") != "success":
+                out["status"] = msg.status
         return out
     return to_json(msg.model_dump(exclude_none=True))
 

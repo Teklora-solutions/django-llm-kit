@@ -14,8 +14,8 @@ DEFAULTS: dict[str, Any] = {
     "GRAPHS": {},
     "DEFAULT_GRAPH": None,
     "REQUIRE_AUTH": True,
-    # Stream modes requested from LangGraph for streamed runs.
-    "STREAM_MODES": ["messages", "updates"],
+    # Stream modes requested from LangGraph for streamed runs ("custom" carries subagents' messages).
+    "STREAM_MODES": ["messages", "updates", "custom"],
     # Seconds between SSE keep-alive comments (0 disables).
     "SSE_KEEPALIVE": 15,
     # Include exception type and message in client-facing error events.
@@ -50,6 +50,11 @@ DEFAULTS: dict[str, Any] = {
     "METRICS_TOKEN": None,
     # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
     "TENANT_RESOLVER": None,
+    # Agents: how deep subagents may nest (0 = no delegation), how many hand-offs one request
+    # may make in total, and seconds before a run stops starting new model calls.
+    "AGENT_MAX_DEPTH": 2,
+    "AGENT_MAX_DELEGATIONS": 8,
+    "AGENT_TIMEOUT": 300,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

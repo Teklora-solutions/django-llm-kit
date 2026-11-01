@@ -1,6 +1,7 @@
 import pytest
 
 from llm_kit.runtime import graphs
+from tests.testapp.fixtures import world  # noqa: F401  (fixture)
 
 
 @pytest.fixture(autouse=True)

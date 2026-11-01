@@ -57,6 +57,13 @@ def build_config(thread, payload: dict[str, Any], user=None) -> dict[str, Any]:
     # Who model tools act for: set by the server, never by the client (stripped above),
     # and never written to checkpoints (LangGraph skips "__" keys).
     config["configurable"][CONFIG_KEY] = caller
+    from llm_kit.agents.registry import is_agent
+
+    if is_agent(thread.graph):  # limits for the run tree, the agent named in recorded runs
+        from llm_kit.core.agents.runner import root_config
+        from llm_kit.core.agents.spec import get_agent
+
+        config = root_config(get_agent(thread.graph), config)
     return config
 
 

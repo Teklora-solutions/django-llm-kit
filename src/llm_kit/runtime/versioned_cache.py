@@ -1,13 +1,18 @@
 """Process-local caches invalidated across processes through Django's cache.
 
-Each process keeps its own copy; a version number in the shared cache tells
+Each process keeps its own copy; a version token in the shared cache tells
 every process when to reload (works across workers with Redis/Memcached; with
 the default LocMemCache it is per-process, which is still correct for one worker).
+
+The token is random, not a counter: a counter restarts when the cache is cleared or
+evicts the key, and could come back to the number a process already loaded at,
+leaving it on stale data.
 """
 
 from __future__ import annotations
 
 import threading
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -35,11 +40,8 @@ class VersionedCache:
         reload that happened mid-transaction can't keep uncommitted data."""
         from django.db import transaction
 
-        self._incr()
-        transaction.on_commit(self._incr)
+        self._new_version()
+        transaction.on_commit(self._new_version)
 
-    def _incr(self) -> None:
-        try:
-            cache.incr(self.key)
-        except ValueError:
-            cache.set(self.key, 1, None)
+    def _new_version(self) -> None:
+        cache.set(self.key, uuid.uuid4().hex, None)

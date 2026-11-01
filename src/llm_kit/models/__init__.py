@@ -1,3 +1,4 @@
+from llm_kit.models.agents import AgentOverride
 from llm_kit.models.catalogue import (
     CatalogueChange,
     CatalogueModel,
@@ -14,6 +15,7 @@ from llm_kit.models.tools import ToolProposal
 from llm_kit.models.touchpoints import TouchpointOverride
 
 __all__ = [
+    "AgentOverride",
     "AlertEvent",
     "AlertRule",
     "CatalogueChange",

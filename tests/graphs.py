@@ -65,10 +65,67 @@ BUILT: list[tuple[str, dict, list]] = []
 
 
 def fake_backend(ref, params, api_keys):
-    """MODEL_BACKEND for tests: an echo model; refs starting with "down/" always fail."""
+    """MODEL_BACKEND for tests: an echo model; refs starting with "down/" always fail;
+    "ollama/script-*" refs follow SCRIPTS (see ScriptModel)."""
     BUILT.append((ref, dict(params), list(api_keys)))
+    if ref.startswith("ollama/script-"):
+        return ScriptModel(ref=ref)
     model = FailingModel(messages=iter([])) if ref.startswith("down/") else EchoModel(messages=iter([]))
     return model
+
+
+# --- a scripted chat model for agent tests
+
+from langchain_core.language_models import BaseChatModel  # noqa: E402
+from langchain_core.outputs import ChatGeneration, ChatResult  # noqa: E402
+
+SCRIPTS: dict[str, list] = {}  # ref -> replies, used in order: AIMessage, str, or fn(messages) -> AIMessage
+SEEN: list[dict] = []  # every call: {"ref", "system", "tools", "messages"}
+
+
+class ScriptModel(BaseChatModel):
+    """Replies from SCRIPTS[ref] in order (then "done"); records what it was given in SEEN."""
+
+    ref: str
+
+    @property
+    def _llm_type(self) -> str:
+        return "script"
+
+    def bind_tools(self, tools, **kwargs):
+        from langchain_core.utils.function_calling import convert_to_openai_tool
+
+        return self.bind(tools=[convert_to_openai_tool(t) for t in tools], **kwargs)
+
+    def _generate(self, messages, stop=None, run_manager=None, tools=None, **kwargs):
+        system = messages[0].content if messages and messages[0].type == "system" else ""
+        SEEN.append(
+            {
+                "ref": self.ref,
+                "system": system,
+                "tools": [t["function"]["name"] for t in tools or []],
+                "messages": list(messages),
+            }
+        )
+        queue = SCRIPTS.get(self.ref) or []
+        reply = queue.pop(0) if queue else "done"
+        if callable(reply):
+            reply = reply(messages)
+        if isinstance(reply, str):
+            reply = AIMessage(content=reply)
+        reply = reply.model_copy(
+            update={"usage_metadata": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}}
+        )
+        return ChatResult(generations=[ChatGeneration(message=reply)])
+
+
+def call(name: str, args: dict | None = None, id: str | None = None) -> AIMessage:
+    """A scripted reply that calls one tool."""
+    import uuid
+
+    return AIMessage(
+        content="", tool_calls=[{"name": name, "args": args or {}, "id": id or f"call-{uuid.uuid4().hex[:8]}"}]
+    )
 
 
 class FailingModel(GenericFakeChatModel):

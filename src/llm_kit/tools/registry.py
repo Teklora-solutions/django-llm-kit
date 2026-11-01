@@ -324,6 +324,39 @@ def for_config(config, **filters) -> list[StructuredTool]:
     return for_user(caller, **filters) if caller is not None else []
 
 
+@dataclass(frozen=True)
+class ToolSelection:
+    """Part of the catalogue, for an agent's ``tools=``: called with a run's config, it returns
+    the selected tools that run's caller may use."""
+
+    names: frozenset | None = None
+    categories: frozenset | None = None
+    kinds: frozenset | None = None
+
+    def __call__(self, config) -> list[StructuredTool]:
+        return for_config(config, names=self.names, categories=self.categories, kinds=self.kinds)
+
+    def entries(self) -> list[ToolEntry]:
+        """Every catalogue entry it selects, whoever the caller."""
+        return list(_select(self.names, self.categories, self.kinds))
+
+    def unknown_names(self) -> list[str]:
+        known = {e.name for e in catalogue()}
+        return sorted(n for n in self.names or () if n not in known)
+
+
+def select(*, names=None, categories=None, kinds=None) -> ToolSelection:
+    """Choose catalogue tools for an agent: ``agent(..., tools=tools.select(kinds=["find"]))``.
+
+    ``kinds``: any of "find", "save", "custom". Each run gets the selected tools its caller may use.
+    """
+
+    def frozen(value):
+        return None if value is None else frozenset([value] if isinstance(value, str) else value)
+
+    return ToolSelection(names=frozen(names), categories=frozen(categories), kinds=frozen(kinds))
+
+
 def all_tools(*, names=None, categories=None, kinds=None) -> list[StructuredTool]:
     """Every tool, unbound: each call reads the caller from the run's config and checks its
     permission. For a ``ToolNode`` built once at import; bind the model with ``for_config``."""

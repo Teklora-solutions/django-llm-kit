@@ -17,6 +17,7 @@ class CallRecord:
     started_at: datetime
     touchpoint: str = ""
     graph: str = ""
+    agent: str = ""  # the agent whose step this was
     node: str = ""
     thread_id: str = ""
     user: str = ""
@@ -48,17 +49,24 @@ class CallRecord:
     provider_request_id: str = ""
     prompt: Any = None  # only when content capture is on
     completion: Any = None
+    agent_runs: list[str] = field(default_factory=list)  # subagent runs it also counts towards (not stored)
 
 
 @dataclass
 class RunRecord:
-    """One top-level invocation: a graph run or a ``complete()`` call."""
+    """One top-level invocation (a graph run or a ``complete()`` call), or a subagent's run inside one.
+
+    A request's run counts every call made under it, subagents included; a subagent's run
+    counts its own calls and those of the subagents it started."""
 
     run_id: str
     name: str
     started_at: datetime
     ended_at: datetime | None = None
     graph: str = ""
+    agent: str = ""
+    parent_run_id: str | None = None  # a subagent's run: the run that handed it the task
+    depth: int = 0  # 0 for the run a request started, 1 for its subagents, ...
     thread_id: str = ""
     user: str = ""
     tenant: str = ""

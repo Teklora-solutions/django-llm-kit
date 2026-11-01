@@ -38,7 +38,20 @@ class LLMKitConfig(AppConfig):
         autodiscover_modules("agent_tools")
         tool_registry.load()
 
+        # Agents: declarations in apps' agents.py, run by the shared harness with Django's tools,
+        # overrides and checkpoints.
+        from llm_kit.agents.env import DjangoAgentEnv
+        from llm_kit.core.agents.env import set_default_env as set_agent_env
+
+        set_agent_env(DjangoAgentEnv())
+        autodiscover_modules("agents")
+
         # Touchpoints declared next to graphs register when their module is imported.
         from llm_kit.runtime.graphs import registry
 
         registry.import_modules()
+
+        # Every touchpoint, tool and agent is known now: check the agents fit together.
+        from llm_kit.agents.registry import validate
+
+        validate()

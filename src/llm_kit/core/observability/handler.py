@@ -65,7 +65,8 @@ class ObservabilityHandler(BaseCallbackHandler):
         self._root: dict[UUID, UUID] = {}  # any run -> its root run
         self._runs: dict[UUID, tuple[RunRecord, float]] = {}
         self._calls: dict[UUID, dict[str, Any]] = {}
-        self._tools: dict[UUID, tuple[ToolRecord, float]] = {}
+        self._tools: dict[UUID, tuple[ToolRecord, float, list[str]]] = {}
+        self._parents: dict[str, str] = {}  # subagent run -> the run that started it
 
     # ------------------------------------------------------------- helpers
 
@@ -80,6 +81,7 @@ class ObservabilityHandler(BaseCallbackHandler):
             self._calls.clear()
             self._tools.clear()
             self._runs.clear()
+            self._parents.clear()
 
     # --------------------------------------------------------------- runs
 
@@ -87,15 +89,25 @@ class ObservabilityHandler(BaseCallbackHandler):
         with self._lock:
             self._gc()
             root = self._root_of(run_id, parent_run_id)
-            if root != run_id:
-                return
             meta, ctx = metadata or {}, current()
+            subagent = root != run_id and meta.get("llm_kit_agent_run") == str(run_id)
+            if root != run_id and not subagent:
+                return
             name = kwargs.get("name") or (serialized or {}).get("name") or "run"
+            parent = None
+            if subagent:
+                parent = str(meta.get("llm_kit_parent_agent_run") or root)
+                if UUID(parent) not in self._runs:
+                    parent = str(root)
+                self._parents[str(run_id)] = parent
             rec = RunRecord(
                 run_id=str(run_id),
                 name=str(name),
                 started_at=_now(),
                 graph=str(meta.get("llm_kit_graph", "")),
+                agent=str(meta.get("llm_kit_agent") or ""),
+                parent_run_id=parent,
+                depth=int(meta.get("llm_kit_depth") or 0),
                 thread_id=str(meta.get("llm_kit_thread") or meta.get("thread_id") or ""),
                 user=str(meta.get("user_id") or ctx.user or ""),
                 tenant=str(meta.get("tenant") or ctx.tenant or ""),
@@ -107,6 +119,7 @@ class ObservabilityHandler(BaseCallbackHandler):
         with self._lock:
             self._root.pop(run_id, None)
             entry = self._runs.pop(run_id, None)
+            self._parents.pop(str(run_id), None)
         if entry is None:
             return
         rec, t0 = entry
@@ -148,6 +161,7 @@ class ObservabilityHandler(BaseCallbackHandler):
             started_at=_now(),
             touchpoint=str(meta.get("llm_kit_touchpoint", "")),
             graph=str(meta.get("llm_kit_graph", "")),
+            agent=str(meta.get("llm_kit_agent") or ""),
             node=str(meta.get("langgraph_node", "")),
             thread_id=str(meta.get("llm_kit_thread") or meta.get("thread_id") or ""),
             user=str(meta.get("user_id") or ctx.user or ""),
@@ -163,6 +177,8 @@ class ObservabilityHandler(BaseCallbackHandler):
             tools_hash=_hash(invocation.get("tools")) if invocation.get("tools") else "",
             prompt=payload if capture else None,
         )
+        if meta.get("llm_kit_agent_run"):
+            rec.agent_runs = self._chain(str(meta["llm_kit_agent_run"]), rec.run_id)
         with self._lock:
             self._calls[run_id] = {
                 "rec": rec,
@@ -233,16 +249,26 @@ class ObservabilityHandler(BaseCallbackHandler):
         self._count(rec)
         recorder.emit(rec)
 
+    def _chain(self, agent_run: str, root: str | None) -> list[str]:
+        """A subagent run and the subagent runs above it, up to (not including) the request's run."""
+        out = []
+        with self._lock:
+            while agent_run and agent_run != root and agent_run not in out and UUID(agent_run) in self._runs:
+                out.append(agent_run)
+                agent_run = self._parents.get(agent_run, "")
+        return out
+
     def _count(self, rec: CallRecord) -> None:
         if rec.run_id is None:
             return
         with self._lock:
-            entry = self._runs.get(UUID(rec.run_id))
-            if entry is not None:
-                run = entry[0]
-                run.calls += 1
-                run.input_tokens += rec.input_tokens
-                run.output_tokens += rec.output_tokens
+            for rid in (rec.run_id, *rec.agent_runs):
+                entry = self._runs.get(UUID(rid))
+                if entry is not None:
+                    run = entry[0]
+                    run.calls += 1
+                    run.input_tokens += rec.input_tokens
+                    run.output_tokens += rec.output_tokens
 
     # -------------------------------------------------------------- tools
 
@@ -258,8 +284,10 @@ class ObservabilityHandler(BaseCallbackHandler):
             started_at=_now(),
             input_hash=_hash(inputs if inputs is not None else input_str),
         )
+        agent_run = (metadata or {}).get("llm_kit_agent_run")
+        runs = self._chain(str(agent_run), rec.run_id) if agent_run else []
         with self._lock:
-            self._tools[run_id] = (rec, time.perf_counter())
+            self._tools[run_id] = (rec, time.perf_counter(), runs)
 
     def _end_tool(self, run_id: UUID, output: Any, error: BaseException | None) -> None:
         with self._lock:
@@ -267,7 +295,7 @@ class ObservabilityHandler(BaseCallbackHandler):
             self._root.pop(run_id, None)
         if entry is None:
             return
-        rec, t0 = entry
+        rec, t0, agent_runs = entry
         rec.duration_ms = int((time.perf_counter() - t0) * 1000)
         if error is not None:
             rec.status, rec.error_class = _status_for(error)
@@ -275,9 +303,10 @@ class ObservabilityHandler(BaseCallbackHandler):
             rec.output_hash = _hash(getattr(output, "content", output))
         if rec.run_id is not None:
             with self._lock:
-                run = self._runs.get(UUID(rec.run_id))
-                if run is not None:
-                    run[0].tool_calls += 1
+                for rid in (rec.run_id, *agent_runs):
+                    run = self._runs.get(UUID(rid))
+                    if run is not None:
+                        run[0].tool_calls += 1
         recorder.emit(rec)
 
     def on_tool_end(self, output, *, run_id, parent_run_id=None, **kwargs):

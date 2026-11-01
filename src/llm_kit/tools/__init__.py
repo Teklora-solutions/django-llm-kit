@@ -25,6 +25,7 @@ The caller (user + tenant) is always set by the server, never by the model.
 from llm_kit.tools.caller import AUTHENTICATED, Caller, caller_for, caller_from
 from llm_kit.tools.registry import (
     ToolEntry,
+    ToolSelection,
     all_tools,
     catalogue,
     entries_for,
@@ -33,12 +34,14 @@ from llm_kit.tools.registry import (
     for_user,
     guidance,
     register,
+    select,
 )
 
 __all__ = [
     "AUTHENTICATED",
     "Caller",
     "ToolEntry",
+    "ToolSelection",
     "all_tools",
     "approve",
     "caller_for",
@@ -54,6 +57,7 @@ __all__ = [
     "proposal_decided",
     "register",
     "reject",
+    "select",
 ]
 
 _PROPOSALS = {"approve", "reject", "pending_for", "proposal_created", "proposal_decided", "ProposalError"}

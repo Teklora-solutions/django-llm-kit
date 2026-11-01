@@ -163,11 +163,12 @@ class Recorder:
         if call.run_id:
             if len(self._run_costs) > 10_000:  # roots that never produce a run record (e.g. a bare tool)
                 self._run_costs.clear()
-            acc = self._run_costs.setdefault(call.run_id, [Decimal(0), 0])
-            if call.cost is not None:
-                acc[0] += call.cost
-            if call.unpriced:
-                acc[1] += 1
+            for run_id in (call.run_id, *call.agent_runs):  # the request's run, and subagent runs it is under
+                acc = self._run_costs.setdefault(run_id, [Decimal(0), 0])
+                if call.cost is not None:
+                    acc[0] += call.cost
+                if call.unpriced:
+                    acc[1] += 1
 
 
 recorder = Recorder()

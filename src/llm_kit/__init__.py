@@ -2,13 +2,13 @@
 
 Most-used entry points::
 
-    from llm_kit import touchpoint, ClientChoice, ServerChoice, get_graph, DjangoSaver
+    from llm_kit import touchpoint, ClientChoice, ServerChoice, get_graph, DjangoSaver, agent
     from llm_kit import catalogue
 """
 
 __version__ = "0.2.0.dev0"
 
-__all__ = ["ClientChoice", "DjangoSaver", "ServerChoice", "get_graph", "get_touchpoint", "touchpoint"]
+__all__ = ["ClientChoice", "DjangoSaver", "ServerChoice", "agent", "get_graph", "get_touchpoint", "touchpoint"]
 
 _CORE = {"touchpoint", "get_touchpoint", "ClientChoice", "ServerChoice"}
 
@@ -19,6 +19,10 @@ def __getattr__(name):
         from llm_kit.core import touchpoints
 
         return getattr(touchpoints, name)
+    if name == "agent":
+        from llm_kit.core.agents import agent
+
+        return agent
     if name == "DjangoSaver":
         from llm_kit.persistence.saver import DjangoSaver
 
