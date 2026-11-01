@@ -38,6 +38,8 @@ DEFAULTS: dict[str, Any] = {
     # Keys for encrypting ProviderKey rows: a list, newest first (rotation).
     # Each is a Fernet key or any passphrase (hashed to one).
     "ENCRYPTION_KEYS": None,
+    # Dotted path to fn(provider) -> secret | [secrets] | None, consulted before stored keys and env vars.
+    "CREDENTIALS": None,
     # Observability: record every model call, tool call and run.
     "OBSERVABILITY": True,
     # Where records go: "database" (Django app), "log", "otel", or dotted paths to sink classes.

@@ -1,4 +1,5 @@
-"""Which API keys exist for a provider: active DB keys first, then environment variables."""
+"""Which API keys exist for a provider: your ``CREDENTIALS`` source, then active DB keys,
+then environment variables."""
 
 from __future__ import annotations
 
@@ -25,11 +26,30 @@ def _load_db_keys() -> dict[str, list[str]]:
     return out
 
 
+def _from_source(provider: str) -> list[str]:
+    """``LLM_KIT["CREDENTIALS"]``: ``fn(provider) -> secret | [secrets] | None``, for projects that
+    keep secrets elsewhere (a settings object, a vault, a service-account file path, OAuth tokens)."""
+    from llm_kit import conf
+    from llm_kit.core.graphs import import_target
+
+    path = conf.get("CREDENTIALS")
+    if not path:
+        return []
+    source = import_target(path) if isinstance(path, str) else path
+    found = source(provider)
+    if not found:
+        return []
+    return [found] if isinstance(found, str) else [k for k in found if k]
+
+
 def api_keys(provider: str) -> list[str]:
     from llm_kit.models import CatalogueProvider
 
     provider = normalise_provider(provider)
-    keys = list(_db_keys.get(_load_db_keys).get(provider, []))
+    keys = _from_source(provider)
+    for k in _db_keys.get(_load_db_keys).get(provider, []):
+        if k not in keys:
+            keys.append(k)
     env_names = CatalogueProvider.objects.filter(provider=provider).values_list("env", flat=True).first() or []
     for k in env_api_keys(provider, env_names):
         if k not in keys:

@@ -212,3 +212,17 @@ def test_postgres_saver_end_to_end(settings):
         assert saver.get_tuple({"configurable": {"thread_id": thread.thread_id, "checkpoint_ns": ""}}) is None
     finally:
         saver.close()
+
+
+def test_in_memory_sqlite_test_database_is_flagged(settings):
+    from django.db import connections
+
+    from llm_kit.persistence.checks import sqlite_test_database_is_shared
+
+    assert sqlite_test_database_is_shared() == [] or os.environ.get("LLM_KIT_TEST_PG")  # ours is a file
+    original = dict(connections.settings["default"])
+    try:
+        connections.settings["default"] = {**original, "ENGINE": "django.db.backends.sqlite3", "TEST": {}}
+        assert [w.id for w in sqlite_test_database_is_shared()] == ["llm_kit.W001"]
+    finally:
+        connections.settings["default"] = original

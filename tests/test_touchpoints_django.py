@@ -54,6 +54,23 @@ def test_provider_keys_are_encrypted_and_come_before_env(monkeypatch):
     assert api_keys("anthropic") == ["pool-1", "pool-2", "env-key"]
 
 
+SECRETS = {"vertex_ai": "/run/secrets/sa.json", "codex": ["tok-1", "", "tok-2"]}
+
+
+def test_a_credentials_source_comes_first_and_unlocks_resolution(monkeypatch, settings):
+    settings.LLM_KIT = {**settings.LLM_KIT, "CREDENTIALS": lambda provider: SECRETS.get(provider)}
+    monkeypatch.setenv("CODEX_API_KEY", "env-key")
+    assert api_keys("codex") == ["tok-1", "tok-2", "env-key"]
+    assert api_keys("google-vertex") == ["/run/secrets/sa.json"]  # provider names are normalised first
+    assert api_keys("mistral") == []
+    from llm_kit.core.touchpoints.env import has_credentials
+    from llm_kit.touchpoints.env import DjangoEnv
+
+    assert has_credentials(DjangoEnv(), "codex/gpt-5-codex")
+    settings.LLM_KIT = {**settings.LLM_KIT, "CREDENTIALS": "tests.test_touchpoints_django:SECRETS.get"}
+    assert api_keys("vertex_ai") == ["/run/secrets/sa.json"]  # or a dotted path
+
+
 def test_encryption_key_is_required(settings):
     settings.LLM_KIT = {**settings.LLM_KIT, "ENCRYPTION_KEYS": None}
     with pytest.raises(ConfigError, match="ENCRYPTION_KEYS"):

@@ -364,6 +364,8 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 
 **SQLite:** LangGraph writes checkpoints from worker threads, so set `"OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 20}` (Django 5.1+). The saver works without it, but this avoids "database is locked" under concurrent load.
 
+**SQLite in tests:** Django's default SQLite test database is in memory, and another thread's write locks whole tables there, so tests that run graphs fail with "database table is locked". Give the test database a file: `DATABASES["default"]["TEST"] = {"NAME": BASE_DIR / "test.sqlite3"}`. The system check `llm_kit.W001` warns when it is in memory. Tests that run graphs also need `TransactionTestCase` (or `django_db(transaction=True)`), because the checkpoint thread can't see a test transaction's uncommitted rows.
+
 ## Choosing the checkpointer
 
 Every graph and agent uses one checkpointer, set by `LLM_KIT["CHECKPOINTER"]`:
@@ -460,6 +462,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
 | `REQUIRE_AUTH` | `True` | |
+| `CREDENTIALS` | `None` | Dotted path to `fn(provider) -> secret | [secrets] | None`, asked before stored keys and env vars (a settings object, a vault, a service-account path, OAuth tokens). |
 | `CHECKPOINTER` | `None` | `DjangoSaver`; see [Choosing the checkpointer](#choosing-the-checkpointer). |
 | `ADOPT_SESSION_THREADS` | `True` | Move a visitor's threads to their account when they sign in. |
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes used for SSE/WebSocket runs (`custom` carries subagents' messages) |

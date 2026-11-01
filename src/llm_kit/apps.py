@@ -20,6 +20,7 @@ class LLMKitConfig(AppConfig):
         from llm_kit import conf  # noqa: F401
         from llm_kit.catalogue import signals as catalogue_signals  # noqa: F401
         from llm_kit.core.touchpoints.env import set_default_env
+        from llm_kit.persistence import checks as persistence_checks  # noqa: F401
         from llm_kit.persistence import signals as persistence_signals  # noqa: F401
         from llm_kit.touchpoints import signals as touchpoint_signals  # noqa: F401
         from llm_kit.touchpoints.env import DjangoEnv
