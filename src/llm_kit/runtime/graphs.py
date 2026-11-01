@@ -55,6 +55,27 @@ registry = GraphRegistry(
     default=lambda: conf.get("DEFAULT_GRAPH"),
 )
 
+# Throwaway agent runs (``agents.run`` with no thread) and their subagents: state in memory,
+# deleted when the run ends. Nothing reads it afterwards, and a database write from LangGraph's
+# background thread is wasted work (and blocks inside a test's transaction).
+_memory = None
+
+
+def memory_checkpointer():
+    global _memory
+    if _memory is None:
+        from langgraph.checkpoint.memory import InMemorySaver
+
+        _memory = InMemorySaver()
+    return _memory
+
+
+ephemeral_registry = GraphRegistry(
+    targets=_targets,
+    checkpointer=memory_checkpointer,
+    default=lambda: conf.get("DEFAULT_GRAPH"),
+)
+
 
 def graph_names() -> list[str]:
     return registry.names()
@@ -68,9 +89,11 @@ def touchpoint_name(graph: str) -> str | None:
     return registry.touchpoint_name(graph)
 
 
-def get_graph(name: str | None = None) -> Pregel:
-    """Return the compiled graph registered as ``name`` (cached per process)."""
-    return registry.get(name)
+def get_graph(name: str | None = None, *, ephemeral: bool = False) -> Pregel:
+    """Return the compiled graph registered as ``name`` (cached per process).
+
+    ``ephemeral``: the same graph with an in-memory checkpointer, for throwaway runs."""
+    return (ephemeral_registry if ephemeral else registry).get(name)
 
 
 def clear_cache() -> None:
@@ -79,3 +102,4 @@ def clear_cache() -> None:
     The checkpointer is kept (it may hold connection pools); it is rebuilt when
     ``CHECKPOINTER`` changes."""
     registry.clear()
+    ephemeral_registry.clear()

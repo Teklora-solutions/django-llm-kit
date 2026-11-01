@@ -11,7 +11,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from llm_kit.core.agents.env import AgentEnv, default_env
-from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree
+from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree, is_ephemeral
 from llm_kit.core.agents.results import AgentResult, from_state
 from llm_kit.core.agents.spec import AgentSpec, get_agent
 
@@ -39,7 +39,8 @@ def _start(name, task, config, env, thread_id):
     spec = name if isinstance(name, AgentSpec) else get_agent(name)
     env = env or default_env()
     config = root_config(spec, config, thread_id)
-    return spec, env.graph(spec.name), {"messages": [HumanMessage(content=task)]}, config
+    graph = env.graph(spec.name, ephemeral=is_ephemeral(config))
+    return spec, graph, {"messages": [HumanMessage(content=task)]}, config
 
 
 def run(

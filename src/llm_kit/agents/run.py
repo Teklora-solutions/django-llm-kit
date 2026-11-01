@@ -37,6 +37,7 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
 
     ``thread`` (a ``llm_kit.models.Thread``, e.g. from ``open_thread``) continues that thread.
     """
+    throwaway = thread is None and thread_id is None
     user, tenant, thread_id = _from_thread(name, thread, user, tenant, thread_id)
     from llm_kit import conf  # noqa: F401  (wires settings into the core config)
     from llm_kit.core.observability.handler import get_handler
@@ -50,6 +51,10 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
     if caller.tenant_id is not None:
         metadata["tenant"] = str(caller.tenant_id)
     configurable = {CONFIG_KEY: caller, **(extra.pop("configurable", None) or {})}
+    if throwaway:  # nothing will continue it: keep its state (and its subagents') in memory
+        from llm_kit.core.agents.limits import EPHEMERAL_KEY
+
+        configurable[EPHEMERAL_KEY] = True
     config: dict[str, Any] = {"configurable": configurable, "metadata": metadata, **extra}
     if (handler := get_handler()) is not None:
         config["callbacks"] = [handler]
@@ -57,11 +62,11 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
 
 
 def _forget(cfg: dict) -> None:
-    """Delete a throwaway run's state: its thread and every subagent thread it started."""
+    """Free a throwaway run's in-memory state: its thread and every subagent thread it started."""
     from llm_kit.core.agents.limits import TREE_KEY
-    from llm_kit.runtime.graphs import get_checkpointer
+    from llm_kit.runtime.graphs import memory_checkpointer
 
-    saver = get_checkpointer()
+    saver = memory_checkpointer()
     tree = cfg["configurable"].get(TREE_KEY)
     for thread_id in [cfg["configurable"]["thread_id"], *(tree.threads if tree else [])]:
         saver.delete_thread(thread_id)
@@ -116,7 +121,8 @@ async def stream(
         name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **config
     )
     try:
-        async for event in astream_run(get_graph(name), {"messages": [HumanMessage(content=task)]}, cfg):
+        graph = get_graph(name, ephemeral=thread is None and thread_id is None)
+        async for event in astream_run(graph, {"messages": [HumanMessage(content=task)]}, cfg):
             yield event
     finally:
         if thread is None and thread_id is None:

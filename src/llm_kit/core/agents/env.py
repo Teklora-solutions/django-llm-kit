@@ -38,8 +38,11 @@ class AgentEnv:
     def override(self, name: str) -> AgentOverride | None:
         return None
 
-    def graph(self, name: str) -> Any:
-        """The compiled graph for an agent, with a checkpointer (subagents run on it)."""
+    def graph(self, name: str, *, ephemeral: bool = False) -> Any:
+        """The compiled graph for an agent, with a checkpointer (subagents run on it).
+
+        ``ephemeral``: for a throwaway run, a graph whose state stays in memory. Without a
+        framework both are in memory."""
         from langgraph.checkpoint.memory import InMemorySaver
 
         from llm_kit.core.agents.harness import build

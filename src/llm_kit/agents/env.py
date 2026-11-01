@@ -46,7 +46,7 @@ class DjangoAgentEnv(AgentEnv):
 
         return override_for(name)
 
-    def graph(self, name: str) -> Any:
+    def graph(self, name: str, *, ephemeral: bool = False) -> Any:
         from llm_kit.runtime.graphs import get_graph
 
-        return get_graph(name)
+        return get_graph(name, ephemeral=ephemeral)

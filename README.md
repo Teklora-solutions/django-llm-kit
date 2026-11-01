@@ -418,7 +418,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 ```
 
 - **Every agent is a graph by its name.** `/llm/stream/` with `{"graph": "crm.assistant"}`, threads, the WebSocket and the model picker work without listing it in `GRAPHS`.
-- **From code:** `llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)` returns an `AgentResult` (`text`, `output`, `steps`, `stopped`, tokens). `arun` and `stream` too. Pass `thread=` or `thread_id=` to continue a conversation. Without either, the run is throwaway: its saved state, and its subagents', is deleted when it ends. The recorded calls and runs are kept.
+- **From code:** `llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)` returns an `AgentResult` (`text`, `output`, `steps`, `stopped`, tokens). `arun` and `stream` too. Pass `thread=` or `thread_id=` to continue a conversation. Without either, the run is throwaway: it and its subagents keep their state in memory, never in the database, and it is freed when the run ends. The recorded calls and runs are kept. This also means a throwaway run works inside a test transaction (Django's `TestCase`).
 - **The loop:** model → tools → model, until the model answers or reaches `max_steps`; on its last step it is told to answer. Each step reads the declaration and admin overrides again.
 - **Tools** are always limited to what the caller may use. The tool node refuses any call outside the agent's own set, so a parent's tools never reach a subagent.
 - **Handing work over:**

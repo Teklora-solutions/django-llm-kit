@@ -15,6 +15,13 @@ from llm_kit.core import config as settings
 
 TREE_KEY = "__llm_kit_tree"
 STACK_KEY = "__llm_kit_agents"  # names from the root agent down to the running one
+# Set on a throwaway run (no thread to continue): it and its subagents keep their state in
+# memory, never in the database. Copied to subagents with the other "__llm_kit_" keys.
+EPHEMERAL_KEY = "__llm_kit_ephemeral"
+
+
+def is_ephemeral(config) -> bool:
+    return bool(((config or {}).get("configurable") or {}).get(EPHEMERAL_KEY))
 
 
 @dataclass

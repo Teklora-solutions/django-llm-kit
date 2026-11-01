@@ -20,7 +20,7 @@ from langchain_core.tools import InjectedToolCallId, StructuredTool
 from pydantic import Field, create_model
 
 from llm_kit.core import config as settings
-from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree, stack_of, tree_of
+from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree, is_ephemeral, stack_of, tree_of
 from llm_kit.core.agents.results import AgentResult, from_state
 from llm_kit.core.agents.spec import AgentSpec, UnknownAgent, get_agent
 from llm_kit.core.errors import LLMKitError
@@ -146,7 +146,8 @@ def _setup(parent, name, task, config, env, call_id, parent_messages):
             "configurable": {**((config or {}).get("configurable") or {}), TREE_KEY: Tree.new()},
         }
     child = child_config(config, sub, thread_id)
-    return sub, env.graph(name), {"messages": _first_messages(sub, task, parent_messages)}, child, thread_id
+    graph = env.graph(name, ephemeral=is_ephemeral(child))
+    return sub, graph, {"messages": _first_messages(sub, task, parent_messages)}, child, thread_id
 
 
 _MODES = ["values", "messages", "custom"]
