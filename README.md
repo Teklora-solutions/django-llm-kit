@@ -364,7 +364,7 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 
 **SQLite:** LangGraph writes checkpoints from worker threads, so set `"OPTIONS": {"transaction_mode": "IMMEDIATE", "timeout": 20}` (Django 5.1+). The saver works without it, but this avoids "database is locked" under concurrent load.
 
-**SQLite in tests:** Django's default SQLite test database is in memory, and another thread's write locks whole tables there, so tests that run graphs fail with "database table is locked". Give the test database a file: `DATABASES["default"]["TEST"] = {"NAME": BASE_DIR / "test.sqlite3"}`. The system check `llm_kit.W001` warns when it is in memory. Tests that run graphs also need `TransactionTestCase` (or `django_db(transaction=True)`), because the checkpoint thread can't see a test transaction's uncommitted rows.
+**SQLite in tests:** Django's default SQLite test database is in memory, and another thread's write locks whole tables there, so tests that run graphs fail with "database table is locked". Give the test database a file: `DATABASES["default"]["TEST"] = {"NAME": BASE_DIR / "test.sqlite3"}`. The system check `llm_kit.W001` warns when it is in memory. Tests that run graphs also need `TransactionTestCase` (or `django_db(transaction=True)`), because the checkpoint thread can't see a test transaction's uncommitted rows. Recording has the same shape on SQLite: the recorder writes from a background thread, and its writes can collide with a test's open transaction ("database is locked", on either side). Set `RECORD_SINKS` to `[]` in test settings unless a test reads the recorded rows. Postgres has neither problem.
 
 ## Choosing the checkpointer
 

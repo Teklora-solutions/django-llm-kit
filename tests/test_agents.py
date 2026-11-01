@@ -582,3 +582,20 @@ def test_deleting_a_thread_deletes_its_subagents_threads(world, scripts):
 
     if isinstance(get_checkpointer(), DjangoSaver):  # other savers have no way to find them by prefix
         assert not _saved(child)
+
+
+def test_your_own_callbacks_run_alongside_recording(temp_agents, scripts):
+    from langchain_core.callbacks import BaseCallbackHandler
+
+    class Ends(BaseCallbackHandler):
+        def __init__(self):
+            self.ends = 0
+
+        def on_llm_end(self, response, **kwargs):
+            self.ends += 1
+
+    mine = Ends()
+    temp_agents("t.watched")
+    scripts[H] = ["hi"]
+    agents.run("t.watched", "hello", callbacks=[mine])
+    assert mine.ends == 1

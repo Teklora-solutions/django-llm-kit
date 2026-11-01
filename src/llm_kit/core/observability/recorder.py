@@ -48,6 +48,7 @@ class Recorder:
         self._lock = threading.Lock()
         self._run_costs: dict[str, list[Any]] = {}  # run_id -> [cost, unpriced_calls]
         self.dropped = 0
+        self._price_errors: dict[str, int] = {}  # error text -> times seen (logged in full once)
 
     # -------------------------------------------------------------- set-up
 
@@ -148,8 +149,15 @@ class Recorder:
         if call.status == "ok" and self.price_lookup is not None:
             try:
                 prices = self.price_lookup(call.model or call.served_model)
-            except Exception:
-                logger.exception("llm-kit price lookup failed for %s", call.model)
+            except Exception as e:
+                # Often the same cause for every call (the database is unreachable, or a test's
+                # database is already gone): say it in full once, then count.
+                key = f"{type(e).__name__}: {e}"
+                seen = self._price_errors[key] = self._price_errors.get(key, 0) + 1
+                if seen == 1:
+                    logger.exception("llm-kit price lookup failed for %s; calls stay unpriced", call.model)
+                elif seen in (10, 100) or seen % 1000 == 0:
+                    logger.warning("llm-kit price lookup has failed %s times: %s", seen, key)
                 prices = None
             call.cost = price_call(
                 prices,

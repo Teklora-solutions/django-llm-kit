@@ -56,8 +56,9 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
 
         configurable[EPHEMERAL_KEY] = True
     config: dict[str, Any] = {"configurable": configurable, "metadata": metadata, **extra}
-    if (handler := get_handler()) is not None:
-        config["callbacks"] = [handler]
+    if (handler := get_handler()) is not None:  # recorded, alongside any callbacks of your own
+        mine = config.get("callbacks") or []
+        config["callbacks"] = [handler, *(mine if isinstance(mine, list) else [mine])]
     return runner.root_config(spec, config, thread_id or f"agent-{uuid.uuid4()}")
 
 
