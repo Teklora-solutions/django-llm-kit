@@ -219,10 +219,17 @@ def test_in_memory_sqlite_test_database_is_flagged(settings):
 
     from llm_kit.persistence.checks import sqlite_test_database_is_shared
 
+    settings.LLM_KIT = {**settings.LLM_KIT, "CHECKPOINTER": None}  # the check is about DjangoSaver
     assert sqlite_test_database_is_shared() == [] or os.environ.get("LLM_KIT_TEST_PG")  # ours is a file
     original = dict(connections.settings["default"])
     try:
         connections.settings["default"] = {**original, "ENGINE": "django.db.backends.sqlite3", "TEST": {}}
         assert [w.id for w in sqlite_test_database_is_shared()] == ["llm_kit.W001"]
+    finally:
+        connections.settings["default"] = original
+    settings.LLM_KIT = {**settings.LLM_KIT, "CHECKPOINTER": "postgres"}
+    connections.settings["default"] = {**original, "ENGINE": "django.db.backends.sqlite3", "TEST": {}}
+    try:
+        assert sqlite_test_database_is_shared() == []  # another checkpointer: not DjangoSaver's problem
     finally:
         connections.settings["default"] = original
