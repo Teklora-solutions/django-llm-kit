@@ -26,6 +26,11 @@ class LLMKitConfig(AppConfig):
 
         set_default_env(DjangoEnv())
         autodiscover_modules("touchpoints")
+        # Recording: sinks from LLM_KIT["RECORD_SINKS"], prices from the catalogue.
+        from llm_kit.observability.setup import configure as configure_observability
+
+        configure_observability()
+
         # Touchpoints declared next to graphs register when their module is imported.
         from llm_kit.runtime.graphs import registry
 

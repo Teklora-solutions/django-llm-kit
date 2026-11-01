@@ -61,6 +61,7 @@ class Touchpoint:
     requires: dict[str, Any] = field(default_factory=dict)
     description: str = ""
     backend: str | None = None  # None = LLM_KIT["MODEL_BACKEND"]
+    capture: bool | None = None  # store prompts/responses; None = LLM_KIT["CAPTURE_CONTENT"]
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -120,12 +121,13 @@ class Touchpoint:
         """
         llm = self.model(requested, config=config, env=env, **params)
         messages = _messages(prompt)
+        run_config = self._run_config(config)
         if schema is None:
-            return llm.invoke(messages, config)
+            return _as_run(llm).invoke(messages, run_config)
         structured = _structured(llm, schema)
         if structured is not None:
-            return _parsed(structured.invoke(messages, config), schema)
-        reply = llm.invoke(messages, config)
+            return _parsed(structured.invoke(messages, run_config), schema)
+        reply = _as_run(llm).invoke(messages, run_config)
         return parse_as(_text(reply), schema)
 
     async def acomplete(
@@ -140,13 +142,33 @@ class Touchpoint:
     ) -> Any:
         llm = self.model(requested, config=config, env=env, **params)
         messages = _messages(prompt)
+        run_config = self._run_config(config)
         if schema is None:
-            return await llm.ainvoke(messages, config)
+            return await _as_run(llm).ainvoke(messages, run_config)
         structured = _structured(llm, schema)
         if structured is not None:
-            return _parsed(await structured.ainvoke(messages, config), schema)
-        reply = await llm.ainvoke(messages, config)
+            return _parsed(await structured.ainvoke(messages, run_config), schema)
+        reply = await _as_run(llm).ainvoke(messages, run_config)
         return parse_as(_text(reply), schema)
+
+    def _run_config(self, config: RunnableConfig | None) -> RunnableConfig | None:
+        """Inside a graph node (config already has callbacks) the call joins that run;
+        otherwise ``complete()`` is a recorded run of its own, named after the touchpoint."""
+        if config and config.get("callbacks"):
+            return config
+        from llm_kit.core.observability.handler import get_handler
+
+        handler = get_handler()
+        if handler is None:
+            return config
+        return {**(config or {}), "callbacks": [handler], "run_name": self.name}
+
+
+def _as_run(llm: Runnable) -> Runnable:
+    """A one-step chain, so the call gets a root run (and a Run record)."""
+    from langchain_core.runnables import RunnablePassthrough
+
+    return RunnablePassthrough() | llm
 
 
 def _structured(llm: Runnable, schema: type[BaseModel]) -> Runnable | None:
@@ -179,6 +201,7 @@ def touchpoint(
     requires: dict[str, Any] | None = None,
     description: str = "",
     backend: str | None = None,
+    capture: bool | None = None,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads)."""
     tp = Touchpoint(
@@ -190,6 +213,7 @@ def touchpoint(
         requires=dict(requires or {}),
         description=description,
         backend=backend,
+        capture=capture,
     )
     with _lock:
         _registry[name] = tp

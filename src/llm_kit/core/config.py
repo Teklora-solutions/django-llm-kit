@@ -33,6 +33,15 @@ DEFAULTS: dict[str, Any] = {
     # Keys for encrypting ProviderKey rows: a list, newest first (rotation).
     # Each is a Fernet key or any passphrase (hashed to one).
     "ENCRYPTION_KEYS": None,
+    # Observability: record every model call, tool call and run.
+    "OBSERVABILITY": True,
+    # Where records go: "database" (Django app), "log", "otel", or dotted paths to sink classes.
+    "RECORD_SINKS": ["database", "log"],
+    # Store prompts/responses (off: only hashes). Per touchpoint: touchpoint(..., capture=True).
+    "CAPTURE_CONTENT": False,
+    # Days to keep captured content and call rows (used by llm_kit_prune).
+    "CONTENT_RETENTION_DAYS": 7,
+    "CALL_RETENTION_DAYS": 90,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

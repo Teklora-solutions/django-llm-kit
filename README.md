@@ -7,6 +7,7 @@ Use LangGraph and LangChain in Django the Django way. Register a graph in `setti
 - **REST API** (DRF): threads, runs, state, history, touchpoints, model pickers, graphs.
 - **WebSocket consumer** (Channels): two-way chat, human-in-the-loop resume, and cancel.
 - **Touchpoints**: each place your code calls an LLM declares its model, fallbacks and **who may choose the model** (server or client, within limits) in code. Admins can override this without a deploy.
+- **Observability**: every model call, tool call and run is recorded: tokens, cost (from the catalogue), latency and time to first token, which model actually answered after fallbacks, and classified errors. Stored in your database and logged as JSON; OpenTelemetry is optional.
 - **Model catalogue**: prices, limits and capabilities for ~12,600 models, synced from models.dev, OpenRouter and LiteLLM. Touchpoints are checked against it.
 
 ```
@@ -140,6 +141,24 @@ summarise.resolve()                           # which model(s) and why, without 
 
 **API keys:** env vars first (`ANTHROPIC_API_KEY`, the names models.dev lists, or a comma-separated pool in `ANTHROPIC_API_KEYS`), plus optional **encrypted keys in the DB** (*Provider keys* in the admin; needs `[crypto]` and `LLM_KIT["ENCRYPTION_KEYS"]`, a list for rotation). Keys are never shown again after saving.
 
+## Observability
+
+Every call through a touchpoint, and every graph run started through llm-kit, is recorded. Nothing to add to your code.
+
+| Record | What it holds |
+|---|---|
+| **LLM call** (one per attempt) | touchpoint, graph/node, thread, user, tenant; requested → resolved → used → served model; who chose it; fallback index; input/output/cached/reasoning tokens (estimated and flagged when a provider sends none); cost; latency and time to first token; status and error class |
+| **LLM run** (graph run or `complete()`) | totals: calls, tool calls, tokens, cost, unpriced calls, duration; status (`ok`, `error`, `interrupted`, `cancelled`) |
+| **Tool call** | name, duration, status, input/output hashes |
+
+- **Cost** comes from the catalogue, including cached-token and long-context pricing. A model without a known price is flagged `unpriced`; it is never counted as $0.
+- **A failed primary and the fallback that answered are two rows**, so you can see how often each provider fails.
+- **Errors** are classified the same way for every provider: `rate_limit` vs `quota_exhausted` (they need different handling), `timeout`, `auth`, `overloaded`, `context_length`, `content_filter`, `bad_request`, `connection`. Use `llm_kit.observability.classify_error(exc)` yourself too.
+- **Content is not stored** by default, only hashes. Opt in per touchpoint with `touchpoint(..., capture=True)` or globally with `CAPTURE_CONTENT`.
+- **Context** outside requests: `with llm_kit.observability.context(user=…, tenant=…, tags={…}):`.
+- **Never slows a call down:** callbacks only enqueue records; a background thread prices and writes them. A failing sink never breaks a call. `llm_kit.observability.flush()` waits for pending writes (tests, scripts).
+- **Sinks** (`RECORD_SINKS`): `"database"` (admin: *LLM calls*, *LLM runs*, *Tool calls*), `"log"` (one JSON line per record on the `llm_kit.calls` logger, never including content), `"otel"` (OpenTelemetry spans with GenAI semantic conventions), or a dotted path to your own class with `write(calls, runs, tools)`.
+
 ## Model catalogue
 
 Metadata for ~12,600 models (prices, context limits, capabilities, modalities, release and deprecation dates), synced from **models.dev**, **OpenRouter** and **LiteLLM** into your database:
@@ -247,6 +266,10 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 | `CATALOGUE_SOURCES` | all | source names or dotted paths |
 | `CATALOGUE_MAX_AGE_HOURS` | `24` | when the catalogue counts as stale |
 | `EXPOSE_ERRORS` | `DEBUG` | include exception details in error events |
+| `OBSERVABILITY` | `True` | record calls, runs and tool calls |
+| `RECORD_SINKS` | `["database", "log"]` | `database`, `log`, `otel`, or dotted paths |
+| `CAPTURE_CONTENT` | `False` | store prompts/responses (per touchpoint: `capture=`) |
+| `CONTENT_RETENTION_DAYS` / `CALL_RETENTION_DAYS` | `7` / `90` | used by `llm_kit_prune` (phase 5) |
 | `REQUIRE_AUTH` | `True` | |
 | `STREAM_MODES` | `["messages", "updates"]` | LangGraph stream modes used for SSE/WebSocket runs |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |

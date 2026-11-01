@@ -159,11 +159,19 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv) -> Runnable:
         "llm_kit_requested": resolution.requested,
         "llm_kit_resolved": resolution.model,
     }
+    if tp.capture is not None:
+        metadata["llm_kit_capture"] = tp.capture
+    from llm_kit.core.observability.handler import get_handler
+
+    handler = get_handler()
     models = []
     for index, ref in enumerate(resolution.candidates):
         model = factory(ref, dict(resolution.params), env.api_keys(provider_of(ref)))
         model.metadata = {**(model.metadata or {}), **metadata, "llm_kit_candidate": index, "llm_kit_model": ref}
         model.tags = [*(model.tags or []), f"llm_kit:{tp.name}"]
+        if handler is not None:
+            existing = model.callbacks if isinstance(model.callbacks, list) else []
+            model.callbacks = [*existing, handler]
         models.append(model)
     if len(models) == 1:
         return models[0]

@@ -45,7 +45,7 @@ __all__ = [
 
 def build_config(thread, payload: dict[str, Any], user=None) -> dict[str, Any]:
     """RunnableConfig for a run on ``thread`` (a ``llm_kit.models.Thread``)."""
-    metadata = {}
+    metadata = {"llm_kit_graph": thread.graph}
     if user is not None and getattr(user, "is_authenticated", False):
         metadata["user_id"] = str(user.pk)
     return _build_config(thread.thread_id, payload, metadata)

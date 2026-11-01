@@ -7,6 +7,7 @@ from llm_kit.models.catalogue import (
 )
 from llm_kit.models.checkpoints import Checkpoint, CheckpointBlob, CheckpointWrite
 from llm_kit.models.credentials import ProviderKey
+from llm_kit.models.observability import LLMCall, LLMRun, ToolCall
 from llm_kit.models.threads import Thread
 from llm_kit.models.touchpoints import TouchpointOverride
 
@@ -19,7 +20,10 @@ __all__ = [
     "Checkpoint",
     "CheckpointBlob",
     "CheckpointWrite",
+    "LLMCall",
+    "LLMRun",
     "ProviderKey",
     "Thread",
+    "ToolCall",
     "TouchpointOverride",
 ]

@@ -29,12 +29,14 @@ drf = ["djangorestframework>=3.15"]
 channels = ["channels>=4.0"]
 litellm = ["langchain-litellm>=0.6"]
 crypto = ["cryptography>=42"]
+otel = ["opentelemetry-api>=1.20"]
 all = ["djangorestframework>=3.15", "channels>=4.0", "langchain-litellm>=0.6", "cryptography>=42"]
 dev = [
     "djangorestframework>=3.15",
     "channels>=4.0",
     "langchain-litellm>=0.6",
     "cryptography>=42",
+    "opentelemetry-sdk>=1.20",
     "daphne>=4.0",
     "pytest>=8",
     "pytest-django>=4.8",

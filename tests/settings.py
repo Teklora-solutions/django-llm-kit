@@ -56,6 +56,9 @@ LLM_KIT = {
     "DEFAULT_GRAPH": "chat",
     "MODEL_BACKEND": "tests.graphs:fake_backend",
     "ENCRYPTION_KEYS": ["test-encryption-passphrase"],
+    # Recording is enabled per test (see tests/test_observability*.py); a background writer
+    # thread inserting rows during unrelated tests would fight their transactions.
+    "RECORD_SINKS": [],
 }
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 

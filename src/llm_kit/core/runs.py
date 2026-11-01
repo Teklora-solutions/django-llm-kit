@@ -67,6 +67,10 @@ def build_config(thread_id: str, payload: dict[str, Any], metadata: dict[str, An
     if "recursion_limit" in extra:
         config["recursion_limit"] = int(extra["recursion_limit"])
     config["metadata"] = {"llm_kit_thread": str(thread_id), **(metadata or {})}
+    from llm_kit.core.observability.handler import get_handler
+
+    if (handler := get_handler()) is not None:
+        config["callbacks"] = [handler]
     return config
 
 
