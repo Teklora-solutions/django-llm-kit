@@ -76,6 +76,7 @@ def child_config(config, spec: AgentSpec, thread_id: str) -> dict[str, Any]:
         configurable[TREE_KEY] = Tree.new()
     configurable[STACK_KEY] = (*stack, spec.name)
     configurable["thread_id"] = thread_id
+    configurable[TREE_KEY].add_thread(thread_id)  # so a throwaway run can delete it afterwards
     if "prompt_vars" in parent:
         configurable["prompt_vars"] = parent["prompt_vars"]
     run_id = uuid.uuid4()

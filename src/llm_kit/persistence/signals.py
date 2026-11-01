@@ -14,6 +14,7 @@ def delete_thread_checkpoints(sender, instance, using, **kwargs):
     saver = get_checkpointer()
     if isinstance(saver, DjangoSaver):
         saver = DjangoSaver(using=using)  # the database the thread was deleted from
+        saver.delete_subagent_threads(instance.thread_id)
     saver.delete_thread(instance.thread_id)
 
 

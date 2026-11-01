@@ -56,12 +56,31 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
     return runner.root_config(spec, config, thread_id or f"agent-{uuid.uuid4()}")
 
 
+def _forget(cfg: dict) -> None:
+    """Delete a throwaway run's state: its thread and every subagent thread it started."""
+    from llm_kit.core.agents.limits import TREE_KEY
+    from llm_kit.runtime.graphs import get_checkpointer
+
+    saver = get_checkpointer()
+    tree = cfg["configurable"].get(TREE_KEY)
+    for thread_id in [cfg["configurable"]["thread_id"], *(tree.threads if tree else [])]:
+        saver.delete_thread(thread_id)
+
+
 def run(
     name: str, task: str, *, user=None, tenant: Any = None, thread_id: str | None = None, thread=None, **config
 ) -> AgentResult:
-    """Run agent ``name`` on ``task`` to the end. ``thread`` or ``thread_id`` continues a conversation."""
+    """Run agent ``name`` on ``task`` to the end. ``thread`` or ``thread_id`` continues a conversation.
+
+    Without either, the run is throwaway: its saved state (and its subagents') is deleted when it
+    ends. The result, and the recorded calls and runs, are kept.
+    """
     cfg = config_for(name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **config)
-    result = runner.run(name, task, config=cfg)
+    try:
+        result = runner.run(name, task, config=cfg)
+    finally:
+        if thread is None and thread_id is None:
+            _forget(cfg)
     if thread is not None:
         thread.save(update_fields=["updated_at"])
     return result
@@ -73,7 +92,11 @@ async def arun(
     cfg = await sync_to_async(config_for, thread_sensitive=True)(
         name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **config
     )
-    result = await runner.arun(name, task, config=cfg)
+    try:
+        result = await runner.arun(name, task, config=cfg)
+    finally:
+        if thread is None and thread_id is None:
+            await sync_to_async(_forget)(cfg)
     if thread is not None:
         await thread.asave(update_fields=["updated_at"])
     return result
@@ -92,5 +115,9 @@ async def stream(
     cfg = await sync_to_async(config_for, thread_sensitive=True)(
         name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **config
     )
-    async for event in astream_run(get_graph(name), {"messages": [HumanMessage(content=task)]}, cfg):
-        yield event
+    try:
+        async for event in astream_run(get_graph(name), {"messages": [HumanMessage(content=task)]}, cfg):
+            yield event
+    finally:
+        if thread is None and thread_id is None:
+            await sync_to_async(_forget)(cfg)

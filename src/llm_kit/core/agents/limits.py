@@ -23,6 +23,7 @@ class Tree:
     max_delegations: int
     deadline: float  # time.monotonic() after which no new model call starts
     delegations: int = 0
+    threads: list[str] = field(default_factory=list)  # subagent threads started in this tree
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     @classmethod
@@ -39,6 +40,10 @@ class Tree:
                 return False
             self.delegations += 1
             return True
+
+    def add_thread(self, thread_id: str) -> None:
+        with self._lock:
+            self.threads.append(thread_id)
 
     @property
     def timed_out(self) -> bool:

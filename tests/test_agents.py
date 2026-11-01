@@ -174,7 +174,7 @@ def test_structured_output(world, scripts):
 def test_delegating_to_a_subagent(world, scripts):
     scripts[A] = [call("delegate", {"agent": "tests.researcher", "task": "Is A-1 paid?"}, id="d1"), "A-1 is open"]
     scripts[R] = [call("find_invoices", {"query": "A-1"}), "open", call("Report", {"answer": "open", "ids": [7]})]
-    result = agents.run("tests.assistant", "is A-1 paid?", user=world["alice"])
+    result = agents.run("tests.assistant", "is A-1 paid?", user=world["alice"], thread_id="deleg-1")
 
     assert result.text == "A-1 is open"
     assert tool_replies(result) == ['{"answer":"open","ids":[7]}']
@@ -426,7 +426,7 @@ def test_deferred_tools_load_when_found(world, scripts, temp_agents):
         essential=["whoami"],
     )
     scripts[A] = [call("find_tools", {"query": "overdue invoices"}), call("find_invoices"), "found them"]
-    result = agents.run("t.lazy", "overdue?", user=world["alice"])
+    result = agents.run("t.lazy", "overdue?", user=world["alice"], thread_id="lazy-1")
     first, second = seen(A)[0], seen(A)[1]
     assert set(first["tools"]) == {"whoami", "find_tools"}
     assert "more tools are available: call `find_tools`" in first["system"]
@@ -549,3 +549,36 @@ def test_long_tool_results_are_cut_with_a_note(temp_agents, scripts):
     result = agents.run("t.reader", "read")
     (reply,) = tool_replies(result)
     assert reply.startswith("x" * 100) and "400 characters omitted" in reply
+
+
+def _saved(thread_id):
+    from llm_kit.runtime.graphs import get_checkpointer
+
+    return get_checkpointer().get_tuple({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}) is not None
+
+
+def test_a_throwaway_run_leaves_no_saved_state(world, scripts):
+    scripts[A] = [call("delegate", {"agent": "tests.researcher", "task": "A-1?"}, id="d9"), "done"]
+    scripts[R] = [call("Report", {"answer": "open"})]
+    result = agents.run("tests.assistant", "check A-1", user=world["alice"])  # no thread: throwaway
+    assert result.text == "done"
+    assert not _saved(result.thread_id)
+    assert not _saved(f"{result.thread_id}/tests.researcher/d9")  # nor its subagent's
+
+
+def test_deleting_a_thread_deletes_its_subagents_threads(world, scripts):
+    from llm_kit.models import Thread
+
+    thread = Thread.objects.create(graph="tests.assistant", user=world["alice"])
+    scripts[A] = [call("delegate", {"agent": "tests.researcher", "task": "A-1?"}, id="d8"), "done"]
+    scripts[R] = [call("Report", {"answer": "open"})]
+    agents.run("tests.assistant", "check A-1", thread=thread)
+    child = f"{thread.thread_id}/tests.researcher/d8"
+    assert _saved(thread.thread_id) and _saved(child)
+    thread.delete()
+    assert not _saved(thread.thread_id)
+    from llm_kit.persistence.saver import DjangoSaver
+    from llm_kit.runtime.graphs import get_checkpointer
+
+    if isinstance(get_checkpointer(), DjangoSaver):  # other savers have no way to find them by prefix
+        assert not _saved(child)

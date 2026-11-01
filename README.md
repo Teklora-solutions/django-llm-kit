@@ -382,7 +382,7 @@ A project that already has an `AsyncPostgresSaver` (as some projects already do)
 - **One async saver per event loop.** An async connection pool belongs to the loop that opened it. A Celery task that calls `asyncio.run` gets a new loop each time, and a shared saver would fail on the second task. llm-kit makes one async saver per running loop and closes the savers of loops that have finished.
 - **Missing halves are filled in.** A sync-only saver (`PostgresSaver`) is run in a worker thread for async code. An async-only factory serves sync code from one background loop.
 - **Shut down cleanly.** With pooled savers (`"postgres"`, or a sync/async dict), `get_checkpointer().close()` frees the connections.
-- Deleting a `Thread` deletes its state from whichever checkpointer is configured.
+- Deleting a `Thread` deletes its state from whichever checkpointer is configured. With `DjangoSaver` its subagents' threads go too; other savers have no way to find those by prefix, so they stay in that checkpointer.
 
 ## Agents and subagents
 
@@ -418,7 +418,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 ```
 
 - **Every agent is a graph by its name.** `/llm/stream/` with `{"graph": "crm.assistant"}`, threads, the WebSocket and the model picker work without listing it in `GRAPHS`.
-- **From code:** `llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)` returns an `AgentResult` (`text`, `output`, `steps`, `stopped`, tokens). `arun` and `stream` too.
+- **From code:** `llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)` returns an `AgentResult` (`text`, `output`, `steps`, `stopped`, tokens). `arun` and `stream` too. Pass `thread=` or `thread_id=` to continue a conversation. Without either, the run is throwaway: its saved state, and its subagents', is deleted when it ends. The recorded calls and runs are kept.
 - **The loop:** model → tools → model, until the model answers or reaches `max_steps`; on its last step it is told to answer. Each step reads the declaration and admin overrides again.
 - **Tools** are always limited to what the caller may use. The tool node refuses any call outside the agent's own set, so a parent's tools never reach a subagent.
 - **Handing work over:**

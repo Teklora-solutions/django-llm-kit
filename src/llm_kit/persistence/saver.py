@@ -311,6 +311,14 @@ class DjangoSaver(BaseCheckpointSaver[str]):
                 self._qs(model).filter(thread_id=thread_id).delete()
 
     @_db
+    def delete_subagent_threads(self, thread_id: str) -> None:
+        """Delete the threads subagents used under ``thread_id`` (``<thread_id>/<agent>/<call>``)."""
+        prefix = f"{thread_id}/"
+        with transaction.atomic(using=self.using):
+            for model in (m.Checkpoint, m.CheckpointBlob, m.CheckpointWrite):
+                self._qs(model).filter(thread_id__startswith=prefix).delete()
+
+    @_db
     def copy_thread(self, source_thread_id: str, target_thread_id: str) -> None:
         source, target = str(source_thread_id), str(target_thread_id)
         with transaction.atomic(using=self.using):
