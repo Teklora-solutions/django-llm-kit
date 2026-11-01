@@ -50,8 +50,8 @@ builder.add_edge("model", END)
 ```python
 # urls.py
 urlpatterns = [
-    path("llm/", include("llm_kit.urls")),          # SSE streaming
-    path("llm/api/", include("llm_kit.api.urls")),  # REST API (needs DRF)
+    path("llm/", include("llm_kit.transport.sse.urls")),          # SSE streaming
+    path("llm/api/", include("llm_kit.transport.api.urls")),  # REST API (needs DRF)
 ]
 ```
 
@@ -89,6 +89,32 @@ In your own code: `llm_kit.get_graph("assistant")` returns the compiled graph (c
 
 ## Model catalogue
 
+Metadata for ~12,600 models (prices, context limits, capabilities, modalities, release and deprecation dates), synced from **models.dev**, **OpenRouter** and **LiteLLM** into your database:
+
+```
+python manage.py llm_kit_sync_catalogue            # conditional requests; safe to run often
+python manage.py llm_kit_sync_catalogue --offline  # bundled snapshot, no network
+```
+
+Schedule it every few hours with Celery Beat (`llm_kit.sync_catalogue`), Django-Q2 (`llm_kit.tasks.run_catalogue_sync`) or cron. It never runs during a request.
+
+```python
+from llm_kit import catalogue
+
+m = catalogue.get("anthropic/claude-sonnet-5-5")   # also "anthropic:…" or a bare id
+m.price_input, m.context_window, m.tool_call        # USD per 1M tokens, ints, bools
+catalogue.search(requires={"tool_call": True, "input": ["image"]}, max_price_input=3, usable_only=True)
+catalogue.has_credentials("gemini")                 # key env var names come from models.dev
+```
+
+- Models are keyed by LiteLLM provider names, so `m.ref` is a valid LiteLLM model string.
+- **Merging:** each field comes from the best source for it. Prices prefer LiteLLM; capabilities prefer models.dev; a provider's own API (OpenRouter) wins for its own models. The admin shows which source supplied each field, and where sources disagree.
+- **Overrides** (admin: *Catalogue overrides*): correct any field, hide a model, or add a private/self-hosted one. They apply immediately and survive syncs.
+- **Change log** (admin: *Catalogue changes*): added, removed, restored, price changes, capability changes, deprecations. The first sync is a silent baseline.
+- **Failures:** a source that fails keeps its previous data; nothing is marked removed because of a network error.
+
+### Legacy model aliases (replaced by touchpoints in v0.2 phase 3)
+
 `get_chat_model(name)` (and `model_from_config(config)` inside nodes) looks up `name` in this order:
 
 1. an active **`LLMModel`** row (admin: *LLM Kit → LLM models*): `model`, optional `provider`, `params` JSON (temperature, max_tokens, …), `api_key_env`
@@ -116,14 +142,14 @@ Events: `thread` (new thread created), `token` (AI message chunk), `message` (co
 
 ## Endpoints
 
-**SSE** (`llm_kit.urls`, async views, serve with ASGI):
+**SSE** (`llm_kit.transport.sse.urls`, async views, serve with ASGI):
 
 - `POST stream/`: create a thread and stream the first run
 - `POST threads/<uuid>/stream/`: stream a run on an existing thread
 
 These are plain Django views, so they use session auth and need the `X-CSRFToken` header. Under WSGI they still work, but the response is buffered instead of streamed.
 
-**REST** (`llm_kit.api.urls`, DRF, uses your `DEFAULT_AUTHENTICATION_CLASSES`):
+**REST** (`llm_kit.transport.api.urls`, DRF, uses your `DEFAULT_AUTHENTICATION_CLASSES`):
 
 | | |
 |---|---|
@@ -134,7 +160,7 @@ These are plain Django views, so they use session auth and need the `X-CSRFToken
 | `GET threads/<id>/history/?limit=20` | checkpoints, newest first |
 | `GET models/`, `GET graphs/` | catalogue and registered graphs |
 
-**WebSocket** (`llm_kit.routing.websocket_urlpatterns`):
+**WebSocket** (`llm_kit.transport.ws.routing.websocket_urlpatterns`):
 
 ```python
 # asgi.py

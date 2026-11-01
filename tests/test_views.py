@@ -96,7 +96,7 @@ async def test_anonymous_mode(async_client, settings):
 async def test_keepalive_is_sent_while_quiet():
     import asyncio
 
-    from llm_kit.views import with_keepalive
+    from llm_kit.transport.sse.views import with_keepalive
 
     async def slow():
         await asyncio.sleep(0.05)

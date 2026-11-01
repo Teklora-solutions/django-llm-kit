@@ -60,7 +60,7 @@ boom_graph = _boom.compile()
 
 
 def call_catalogue_model(state: MessagesState, config):
-    from llm_kit.catalogue import model_from_config
+    from llm_kit.runtime.legacy_catalogue import model_from_config
 
     return {"messages": [model_from_config(config).invoke(state["messages"], config)]}
 

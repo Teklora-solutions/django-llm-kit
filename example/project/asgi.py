@@ -9,7 +9,7 @@ from channels.auth import AuthMiddlewareStack  # noqa: E402
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 from channels.security.websocket import AllowedHostsOriginValidator  # noqa: E402
 
-from llm_kit.routing import websocket_urlpatterns  # noqa: E402
+from llm_kit.transport.ws.routing import websocket_urlpatterns  # noqa: E402
 
 application = ProtocolTypeRouter(
     {

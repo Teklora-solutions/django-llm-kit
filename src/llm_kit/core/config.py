@@ -22,6 +22,10 @@ DEFAULTS: dict[str, Any] = {
     "SSE_KEEPALIVE": 15,
     # Include exception type and message in client-facing error events.
     "EXPOSE_ERRORS": False,
+    # Catalogue: source names / dotted paths (None = all built-ins), and the
+    # age after which `llm_kit_status` reports the catalogue as stale.
+    "CATALOGUE_SOURCES": None,
+    "CATALOGUE_MAX_AGE_HOURS": 24,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

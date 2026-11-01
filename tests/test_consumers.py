@@ -3,7 +3,7 @@ from channels.routing import URLRouter
 from channels.testing import WebsocketCommunicator
 
 from llm_kit.models import Thread
-from llm_kit.routing import websocket_urlpatterns
+from llm_kit.transport.ws.routing import websocket_urlpatterns
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -53,3 +53,6 @@ src = ["src", "."]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/llm_kit/migrations/*" = ["E501"]

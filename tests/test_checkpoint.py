@@ -41,7 +41,7 @@ def test_conversation_persists_and_matches_in_memory_saver(saver):
     assert django_hist == memory_hist
 
     # A fresh saver instance (e.g. after a restart) sees the same state.
-    from llm_kit.checkpoint import DjangoSaver
+    from llm_kit.persistence.saver import DjangoSaver
 
     reloaded = chat_builder.compile(checkpointer=DjangoSaver())
     assert _messages(reloaded.get_state(c1))[-1] == ("ai", "echo: again")

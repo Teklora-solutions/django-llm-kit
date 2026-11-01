@@ -1,6 +1,6 @@
 import pytest
 
-from llm_kit import graphs
+from llm_kit.runtime import graphs
 
 
 @pytest.fixture(autouse=True)
@@ -12,7 +12,7 @@ def _fresh_graphs():
 
 @pytest.fixture
 def saver():
-    from llm_kit.checkpoint import DjangoSaver
+    from llm_kit.persistence.saver import DjangoSaver
 
     return DjangoSaver()
 
@@ -28,7 +28,7 @@ def fake_init(monkeypatch):
         calls.append((model, kwargs))
         return EchoModel(messages=iter([]))
 
-    monkeypatch.setattr("llm_kit.catalogue.init_chat_model", fake)
+    monkeypatch.setattr("llm_kit.runtime.legacy_catalogue.init_chat_model", fake)
     return calls
 
 
