@@ -24,6 +24,11 @@ dependencies = [
     "langchain-core>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Teklora-solutions/django-llm-kit"
+Repository = "https://github.com/Teklora-solutions/django-llm-kit"
+Issues = "https://github.com/Teklora-solutions/django-llm-kit/issues"
+
 [project.optional-dependencies]
 drf = ["djangorestframework>=3.15"]
 channels = ["channels>=4.0"]

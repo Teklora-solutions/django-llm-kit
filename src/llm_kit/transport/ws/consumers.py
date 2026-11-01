@@ -47,7 +47,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         thread_id = self.scope["url_route"]["kwargs"].get("thread_id")
         if thread_id is not None:
             try:
-                self.thread = await database_sync_to_async(access.get_thread)(thread_id, self.user)
+                self.thread = await database_sync_to_async(self._get_thread)(thread_id)
             except Thread.DoesNotExist:
                 await self.close(code=CLOSE_NOT_FOUND)
                 return
@@ -55,6 +55,9 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                 await self.close(code=CLOSE_FORBIDDEN)
                 return
         await self.accept()
+
+    def _get_thread(self, thread_id):
+        return access.get_thread(thread_id, access.owner_from_scope(self.scope))
 
     async def disconnect(self, code):
         if self.task and not self.task.done():
@@ -83,7 +86,11 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             graph = payload.get("graph") or default_graph_name()
             get_graph(graph)
             runs.validate_choice(graph, payload.get("model"))  # before creating anything
-            self.thread = Thread.objects.create(graph=graph, user=access.owner_for_new_thread(self.user))
+            fields = access.owner_fields(access.owner_from_scope(self.scope))
+            self.thread = Thread.objects.create(graph=graph, **fields)
+            session = self.scope.get("session")
+            if fields.get("session_key") and session is not None and getattr(session, "modified", False):
+                session.save()  # the visitor id must outlive this connection
             return True
         runs.validate_choice(self.thread.graph, payload.get("model"))
         return False
@@ -95,7 +102,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             graph_input = runs.build_input(payload)
             # Sync: TENANT_RESOLVER may query the database.
             config = await database_sync_to_async(runs.build_config)(self.thread, payload, self.user)
-        except (UnknownGraph, runs.BadRequest) as e:
+        except (UnknownGraph, runs.BadRequest, access.NotAllowed) as e:
             await self.send_event("error", {"message": str(e)})
             return
         if created:

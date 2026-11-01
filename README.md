@@ -331,7 +331,24 @@ Send `{"type": "run", …payload}` or `{"type": "cancel"}`. Close codes: 4401 no
 
 ## Access control
 
-With `REQUIRE_AUTH: True` (the default), every endpoint needs a logged-in user, and users only see threads they own. Ownerless threads (made in the admin or by scripts) are open only to staff. With `REQUIRE_AUTH: False`, anonymous users can create threads and use them by id (ids are random UUIDs), but listing never shows ownerless threads.
+A thread belongs to a **user**, an anonymous **visitor**, a **key your code chose**, or **nobody** (made by code).
+
+- With `REQUIRE_AUTH: True` (the default), every endpoint needs a signed-in user, and users see only their own threads.
+- With `REQUIRE_AUTH: False`, visitors may chat too. Their threads are tied to a random id kept in their session data, so other visitors can't use them even if they know the id. Over WebSocket this needs `SessionMiddlewareStack` and a session started by an earlier page load.
+- When a visitor signs in, their threads move to their account (`ADOPT_SESSION_THREADS`, on by default). Django rotates the session key at login but keeps the session data, which is why the id lives in the data. Call `access.adopt_session_threads(request, user)` yourself if you sign users in some other way.
+- Staff may open threads that have no user (visitor, keyed or code threads), to inspect them; never another user's.
+- With `TENANT_RESOLVER`, new threads are stamped with the user's tenant, and a thread from another tenant is refused.
+
+**Threads your code keys** (a WhatsApp number, a ticket, a Celery job). Clients can never pick or look up a key; only your code can:
+
+```python
+from llm_kit.runtime.threads import open_thread
+
+thread = open_thread("support.assistant", key=f"whatsapp:{jid}", tenant=business.pk)  # get or create
+result = agents.run("support.assistant", text, thread=thread)  # user and tenant come from the thread
+```
+
+Keys are unique per tenant. `aopen_thread` is the async form.
 
 ## Using the checkpointer directly
 
@@ -422,6 +439,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
 | `REQUIRE_AUTH` | `True` | |
+| `ADOPT_SESSION_THREADS` | `True` | Move a visitor's threads to their account when they sign in. |
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes used for SSE/WebSocket runs (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |
 

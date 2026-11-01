@@ -57,18 +57,19 @@ def _error(status: int, message: str) -> JsonResponse:
     return JsonResponse({"detail": message}, status=status)
 
 
-def _resolve_thread(thread_id, user, body):
+def _resolve_thread(thread_id, request, body):
     """Sync: load (or create) the thread and validate the payload."""
+    owner = access.owner_from_request(request)
     if thread_id is None:
         graph = body.get("graph") or default_graph_name()
         get_graph(graph)  # raises UnknownGraph
         runs.validate_choice(graph, body.get("model"))  # before creating anything
         message = body.get("message")
         title = body.get("title") or (message if isinstance(message, str) else "")
-        thread = Thread.objects.create(graph=graph, user=access.owner_for_new_thread(user), title=str(title)[:255])
+        thread = Thread.objects.create(graph=graph, title=str(title)[:255], **access.owner_fields(owner))
         created = True
     else:
-        thread = access.get_thread(thread_id, user)
+        thread = access.get_thread(thread_id, owner)
         runs.validate_choice(thread.graph, body.get("model"))
         created = False
     return thread, created
@@ -87,7 +88,7 @@ async def stream(request, thread_id=None):
         return _error(400, "Body must be a JSON object.")
 
     try:
-        thread, created = await sync_to_async(_resolve_thread)(thread_id, user, body)
+        thread, created = await sync_to_async(_resolve_thread)(thread_id, request, body)
         graph = get_graph(thread.graph)
         payload_input = runs.build_input(body)
         config = await sync_to_async(runs.build_config)(thread, body, user)  # TENANT_RESOLVER may query

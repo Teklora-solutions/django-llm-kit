@@ -9,7 +9,7 @@ class ThreadAccess(BasePermission):
 
     def has_object_permission(self, request, view, obj):
         try:
-            access.check_thread(obj, request.user)
+            access.check_thread(obj, access.owner_from_request(request))
         except access.NotAllowed:
             return False
         return True

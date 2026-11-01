@@ -17,7 +17,12 @@ class Thread(models.Model):
         on_delete=models.CASCADE,
         related_name="llm_threads",
     )
-    graph = models.CharField(max_length=100, help_text="Name from LLM_KIT['GRAPHS'].")
+    # Anonymous visitors: a random id kept in their session data (survives the key rotation at login).
+    session_key = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Chosen by your code, never by a client: e.g. "whatsapp:254700000000". Unique per tenant.
+    external_key = models.CharField(max_length=255, blank=True, default="")
+    tenant = models.CharField(max_length=64, blank=True, default="", help_text="Tenant id (string).")
+    graph = models.CharField(max_length=100, help_text="Graph or agent name.")
     title = models.CharField(max_length=255, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -26,9 +31,26 @@ class Thread(models.Model):
     class Meta:
         ordering = ["-updated_at"]
         indexes = [models.Index(fields=["user", "-updated_at"])]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "external_key"],
+                condition=~models.Q(external_key=""),
+                name="llm_kit_thread_external_key_per_tenant",
+            )
+        ]
 
     def __str__(self) -> str:
         return self.title or str(self.id)
+
+    @property
+    def owner_label(self) -> str:
+        if self.user_id:
+            return f"user {self.user_id}"
+        if self.external_key:
+            return self.external_key
+        if self.session_key:
+            return "visitor"
+        return "nobody (code only)"
 
     @property
     def thread_id(self) -> str:

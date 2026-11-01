@@ -1,7 +1,7 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -31,7 +31,7 @@ class ThreadViewSet(viewsets.ModelViewSet):
     permission_classes = [ThreadAccess]
 
     def get_queryset(self):
-        return access.threads_for(self.request.user)
+        return access.threads_for(access.owner_from_request(self.request))
 
     def get_object(self):
         # Look up by id across all threads; ThreadAccess decides who may use it.
@@ -40,7 +40,11 @@ class ThreadViewSet(viewsets.ModelViewSet):
         return obj
 
     def perform_create(self, serializer):
-        serializer.save(user=access.owner_for_new_thread(self.request.user))
+        try:
+            fields = access.owner_fields(access.owner_from_request(self.request))
+        except access.NotAllowed as e:
+            raise PermissionDenied(str(e)) from e
+        serializer.save(**fields)
 
     @action(detail=True, methods=["get"])
     def state(self, request, pk=None):

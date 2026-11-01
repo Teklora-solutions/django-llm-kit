@@ -14,6 +14,8 @@ DEFAULTS: dict[str, Any] = {
     "GRAPHS": {},
     "DEFAULT_GRAPH": None,
     "REQUIRE_AUTH": True,
+    # Move a visitor's threads to their account when they sign in (Django's user_logged_in).
+    "ADOPT_SESSION_THREADS": True,
     # Stream modes requested from LangGraph for streamed runs ("custom" carries subagents' messages).
     "STREAM_MODES": ["messages", "updates", "custom"],
     # Seconds between SSE keep-alive comments (0 disables).
