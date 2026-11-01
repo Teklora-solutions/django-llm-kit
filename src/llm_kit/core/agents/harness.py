@@ -207,10 +207,20 @@ def _refusal(call, step: Step) -> ToolMessage:
     )
 
 
-def _as_tool_message(result: Any, call) -> ToolMessage:
+def cap(text: Any, limit: int | None) -> Any:
+    """``text`` cut to ``limit`` characters, saying so: a model handed a silently cut document
+    reasons as if it were complete."""
+    if not limit or not isinstance(text, str) or len(text) <= limit:
+        return text
+    kept = text[:limit].rstrip()
+    return f"{kept}\n\n[... {len(text) - len(kept)} characters omitted; this result was truncated ...]"
+
+
+def _as_tool_message(result: Any, call, limit: int | None = None) -> ToolMessage:
     if isinstance(result, ToolMessage):
+        result.content = cap(result.content, limit)
         return result
-    return ToolMessage(content=str(result), tool_call_id=call["id"], name=call["name"])
+    return ToolMessage(content=cap(str(result), limit), tool_call_id=call["id"], name=call["name"])
 
 
 def _failed(call, exc: Exception) -> ToolMessage:
@@ -304,7 +314,8 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
                 out.append(_refusal(call, step))
                 continue
             try:
-                out.append(_as_tool_message(tool.invoke({**call, "type": "tool_call"}, config), call))
+                result = tool.invoke({**call, "type": "tool_call"}, config)
+                out.append(_as_tool_message(result, call, step.spec.tool_result_chars))
             except GraphBubbleUp:
                 raise
             except Exception as e:  # the model reads the error and can recover
@@ -329,7 +340,8 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
             if tool is None:
                 return _refusal(call, step)
             try:
-                return _as_tool_message(await tool.ainvoke({**call, "type": "tool_call"}, config), call)
+                result = await tool.ainvoke({**call, "type": "tool_call"}, config)
+                return _as_tool_message(result, call, step.spec.tool_result_chars)
             except GraphBubbleUp:
                 raise
             except Exception as e:

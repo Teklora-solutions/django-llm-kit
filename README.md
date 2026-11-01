@@ -432,6 +432,7 @@ def weekly_report(task, ctx):                         # Python instead of a mode
   - `AGENT_TIMEOUT` (300 s) before no new model call starts.
   - No agent can hand work to itself or to an agent above it.
 - **History window:** `history=2000` sends each model call only the newest ~2000 tokens of the conversation, starting at a user message. The checkpoint still keeps everything.
+- **Long tool results:** `tool_result_chars=12000` cuts each tool result to that many characters, with a note saying how much was left out, so one fetched page can't fill the context window.
 - **Public tools:** a tool registered with `permission=tools.PUBLIC` is offered to anonymous visitors and to runs with no user (a Celery task). Use it only for tools that read public data. Tools generated from your models can't be public.
 - **Loading tools on demand:** `defer_tools=True, essential=[...]` binds only the essential tools plus `find_tools`. Tools it finds are bound from the next step and stay loaded in the thread.
 - **Admin overrides** (*Agent overrides*): append to or replace the prompt, lower `max_steps`, narrow the tools, or pause an agent. They narrow the declaration in code, never widen it. Change an agent's model through its touchpoint override.

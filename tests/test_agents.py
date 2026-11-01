@@ -533,3 +533,19 @@ def tools_select_public():
     from llm_kit import tools
 
     return tools.select(categories=["public"])
+
+
+def test_long_tool_results_are_cut_with_a_note(temp_agents, scripts):
+    from langchain_core.messages import AIMessage
+    from langchain_core.tools import tool
+
+    @tool
+    def big_page() -> str:
+        """A long page."""
+        return "x" * 500
+
+    temp_agents("t.reader", tools=[big_page], tool_result_chars=100)
+    scripts[H] = [AIMessage(content="", tool_calls=[{"name": "big_page", "args": {}, "id": "b1"}]), "read it"]
+    result = agents.run("t.reader", "read")
+    (reply,) = tool_replies(result)
+    assert reply.startswith("x" * 100) and "400 characters omitted" in reply

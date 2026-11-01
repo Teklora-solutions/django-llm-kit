@@ -65,6 +65,7 @@ class AgentSpec:
     defer_tools: bool = False
     essential: tuple[str, ...] = ()  # with defer_tools: the tools bound from the start
     history: int | None = None  # tokens of conversation sent to the model (newest kept); None = all
+    tool_result_chars: int | None = None  # each tool result cut to this many characters; None = no cap
     code: Callable[..., Any] | None = None
     paused: str = ""  # set by an override; see ``with_override``
     allowed_tools: frozenset[str] | None = None  # set by an override: only these tool names
@@ -82,6 +83,8 @@ class AgentSpec:
             raise ConfigError(f"Agent {self.name!r} lists itself as a subagent.")
         if self.max_steps < 1:
             raise ConfigError(f"Agent {self.name!r}: max_steps must be at least 1.")
+        if self.tool_result_chars is not None and self.tool_result_chars < 1:
+            raise ConfigError(f"Agent {self.name!r}: tool_result_chars must be positive, or None.")
         if self.history is not None and self.history < 1:
             raise ConfigError(f"Agent {self.name!r}: history must be a positive number of tokens, or None.")
         if self.output is not None and not (isinstance(self.output, type) and issubclass(self.output, BaseModel)):
@@ -167,6 +170,7 @@ def agent(
     defer_tools: bool = False,
     essential: Sequence[str] = (),
     history: int | None = None,
+    tool_result_chars: int | None = None,
 ) -> AgentSpec:
     """Declare and register an agent run by the shared harness. Re-declaring a name replaces it.
 
@@ -184,6 +188,8 @@ def agent(
         defer_tools: bind only ``essential`` tools plus ``find_tools``; the rest load when found.
         history: about how many tokens of the conversation each model call sees, newest first,
             always starting at a user message (the checkpoint keeps everything). None: all of it.
+        tool_result_chars: cut each tool result to this many characters, with a note saying so
+            (fetched pages and documents are the largest thing in a context window). None: no cap.
     """
     tp_name = getattr(touchpoint, "name", touchpoint)
     return _register(
@@ -200,6 +206,7 @@ def agent(
             defer_tools=defer_tools,
             essential=tuple(essential),
             history=history,
+            tool_result_chars=tool_result_chars,
         )
     )
 

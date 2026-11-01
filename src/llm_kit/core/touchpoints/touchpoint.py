@@ -151,9 +151,12 @@ class Touchpoint:
         reply = await _as_run(llm).ainvoke(messages, run_config)
         return parse_as(_text(reply), schema)
 
-    def _run_config(self, config: RunnableConfig | None) -> RunnableConfig | None:
-        """Inside a graph node (config already has callbacks) the call joins that run;
-        otherwise ``complete()`` is a recorded run of its own, named after the touchpoint."""
+    def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
+        """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
+
+        Inside a graph node (config already has callbacks) the call joins that run; otherwise
+        it is a recorded run of its own, named after the touchpoint. Metadata you pass (for
+        example ``{"llm_kit_agent": "crm.writer"}``) is recorded with the call."""
         if config and config.get("callbacks"):
             return config
         from llm_kit.core.observability.handler import get_handler
@@ -162,6 +165,8 @@ class Touchpoint:
         if handler is None:
             return config
         return {**(config or {}), "callbacks": [handler], "run_name": self.name}
+
+    _run_config = run_config
 
 
 def _as_run(llm: Runnable) -> Runnable:
