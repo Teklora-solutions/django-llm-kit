@@ -45,10 +45,19 @@ __all__ = [
 
 def build_config(thread, payload: dict[str, Any], user=None) -> dict[str, Any]:
     """RunnableConfig for a run on ``thread`` (a ``llm_kit.models.Thread``)."""
+    from llm_kit.tools.caller import CONFIG_KEY, caller_for
+
+    caller = caller_for(user)
     metadata = {"llm_kit_graph": thread.graph}
-    if user is not None and getattr(user, "is_authenticated", False):
-        metadata["user_id"] = str(user.pk)
-    return _build_config(thread.thread_id, payload, metadata)
+    if caller.is_authenticated:
+        metadata["user_id"] = str(caller.user_id)
+    if caller.tenant_id is not None:
+        metadata["tenant"] = str(caller.tenant_id)
+    config = _build_config(thread.thread_id, payload, metadata)
+    # Who model tools act for: set by the server, never by the client (stripped above),
+    # and never written to checkpoints (LangGraph skips "__" keys).
+    config["configurable"][CONFIG_KEY] = caller
+    return config
 
 
 def validate_choice(graph: str, requested: str | None) -> None:

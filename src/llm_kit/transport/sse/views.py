@@ -90,7 +90,7 @@ async def stream(request, thread_id=None):
         thread, created = await sync_to_async(_resolve_thread)(thread_id, user, body)
         graph = get_graph(thread.graph)
         payload_input = runs.build_input(body)
-        config = runs.build_config(thread, body, user)
+        config = await sync_to_async(runs.build_config)(thread, body, user)  # TENANT_RESOLVER may query
     except Thread.DoesNotExist:
         return _error(404, "Thread not found.")
     except access.NotAllowed as e:

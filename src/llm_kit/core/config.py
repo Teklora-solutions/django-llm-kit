@@ -48,6 +48,8 @@ DEFAULTS: dict[str, Any] = {
     "MONITORING_PERMISSION": None,
     # Bearer token accepted by /llm/metrics/ (Prometheus); staff sessions always work.
     "METRICS_TOKEN": None,
+    # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
+    "TENANT_RESOLVER": None,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

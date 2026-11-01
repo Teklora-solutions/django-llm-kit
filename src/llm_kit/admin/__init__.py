@@ -7,5 +7,6 @@ from llm_kit.admin import (  # noqa: F401
     monitoring,
     observability,
     threads,
+    tools,
     touchpoints,
 )

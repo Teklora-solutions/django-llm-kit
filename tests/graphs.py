@@ -110,3 +110,35 @@ async def sleepy(state: MessagesState):
 slow_builder = StateGraph(MessagesState)
 slow_builder.add_node("sleepy", sleepy)
 slow_builder.add_edge(START, "sleepy")
+
+
+# --- an agent that calls llm-kit model tools. The user message is JSON: {"tool": name, "args": {...}}
+
+
+def make_tools_graph(checkpointer):
+    import json
+
+    from langchain_core.messages import AIMessage
+    from langgraph.prebuilt import ToolNode
+
+    from llm_kit import tools
+
+    def agent(state: MessagesState, config):
+        last = state["messages"][-1]
+        if last.type == "tool":
+            return {"messages": [AIMessage(content=f"tool said: {last.content}")]}
+        ask = json.loads(last.content)
+        offered = [t.name for t in tools.for_config(config)]  # what the model would be bound with
+        call = {"name": ask["tool"], "args": ask.get("args", {}), "id": "call-1", "type": "tool_call"}
+        return {"messages": [AIMessage(content=f"offered: {','.join(offered)}", tool_calls=[call])]}
+
+    def route(state: MessagesState):
+        return "tools" if state["messages"][-1].tool_calls else END
+
+    b = StateGraph(MessagesState)
+    b.add_node("agent", agent)
+    b.add_node("tools", ToolNode(tools.all_tools()))
+    b.add_edge(START, "agent")
+    b.add_conditional_edges("agent", route, ["tools", END])
+    b.add_edge("tools", "agent")
+    return b.compile(checkpointer=checkpointer)

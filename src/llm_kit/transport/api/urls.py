@@ -3,7 +3,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
-from llm_kit.transport.api import monitoring, views
+from llm_kit.transport.api import monitoring, tools, views
 
 app_name = "llm_kit_api"
 
@@ -21,5 +21,17 @@ urlpatterns = [
     path("monitoring/top/", monitoring.TopView.as_view(), name="monitoring-top"),
     path("monitoring/providers/", monitoring.ProvidersView.as_view(), name="monitoring-providers"),
     path("monitoring/alerts/", monitoring.AlertsView.as_view(), name="monitoring-alerts"),
+    path("tools/", tools.ToolListView.as_view(), name="tools"),
+    path("tools/proposals/", tools.ProposalListView.as_view(), name="tool-proposals"),
+    path(
+        "tools/proposals/<int:pk>/approve/",
+        tools.ProposalDecisionView.as_view(decision="approve"),
+        name="tool-proposal-approve",
+    ),
+    path(
+        "tools/proposals/<int:pk>/reject/",
+        tools.ProposalDecisionView.as_view(decision="reject"),
+        name="tool-proposal-reject",
+    ),
     path("", include(router.urls)),
 ]

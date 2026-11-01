@@ -7,6 +7,7 @@ from langgraph.graph import START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from chat.touchpoints import assistant
+from llm_kit import tools as model_tools
 
 
 @tool
@@ -20,13 +21,14 @@ TOOLS = [current_time]
 
 def call_model(state: MessagesState, config):
     # config carries the run's requested model ("model" in the request), checked against the touchpoint.
-    llm = assistant.model(config=config).bind_tools(TOOLS)
+    # Model tools (chat/models.py Note.AgentAccess) for the caller the server put in config.
+    llm = assistant.model(config=config).bind_tools(TOOLS + model_tools.for_config(config))
     return {"messages": [llm.invoke(state["messages"], config)]}
 
 
 builder = StateGraph(MessagesState)
 builder.add_node("model", call_model)
-builder.add_node("tools", ToolNode(TOOLS))
+builder.add_node("tools", ToolNode(TOOLS + model_tools.all_tools()))  # each call re-checks the caller
 builder.add_edge(START, "model")
 builder.add_conditional_edges("model", tools_condition)
 builder.add_edge("tools", "model")

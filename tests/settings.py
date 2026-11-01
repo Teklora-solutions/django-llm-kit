@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "channels",
     "llm_kit",
+    "tests.testapp",
 ]
 MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -52,6 +53,7 @@ LLM_KIT = {
         "boom": "tests.graphs.boom_graph",
         "catalogue": {"graph": "tests.graphs:catalogue_builder", "touchpoint": "tests.chat"},
         "slow": "tests.graphs:slow_builder",
+        "tools": "tests.graphs:make_tools_graph",
     },
     "DEFAULT_GRAPH": "chat",
     "MODEL_BACKEND": "tests.graphs:fake_backend",
@@ -59,6 +61,7 @@ LLM_KIT = {
     # Recording is enabled per test (see tests/test_observability*.py); a background writer
     # thread inserting rows during unrelated tests would fight their transactions.
     "RECORD_SINKS": [],
+    "TENANT_RESOLVER": "tests.testapp.tenancy:tenant_for",
 }
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
@@ -77,3 +80,4 @@ if _pg := os.environ.get("LLM_KIT_TEST_PG"):
             "PORT": _u.port or 5432,
         }
     }
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

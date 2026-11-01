@@ -188,6 +188,69 @@ The same data as JSON (staff only unless `MONITORING_PERMISSION` names a DRF per
 - `/llm/metrics/`: Prometheus gauges for the last hour plus circuit state and catalogue age. Needs a staff session or `Authorization: Bearer <METRICS_TOKEN>`.
 - `manage.py llm_kit_prune [--dry-run] [--threads DAYS]`: deletes old calls, runs, tool calls, catalogue changes and alerts, and clears captured content after `CONTENT_RETENTION_DAYS`. Threads are only deleted when you pass `--threads`.
 
+## Agent tools from your models
+
+Declare what agents may see on a model, and llm-kit generates the tools: `find_<plural>` (search, filter, page, or look up by id) and, if the model allows writes, `save_<name>` (create, or update by id). There are no delete tools.
+
+```python
+class Invoice(models.Model):
+    ...
+    class AgentAccess:
+        description = "invoices we sent to customers"
+        fields = ["number", "customer", "total", "status", "issued_on"]   # nothing else is shown
+        search_fields = ["number", "customer__name"]
+        filter_fields = ["status", "issued_on", "customer"]              # dates get _from / _to
+        tenant_field = "organisation"     # whose rows: owner_field, tenant_field, agent_queryset, or unscoped = "why"
+        writes = "direct"                 # "none" | "direct" | "approval"
+        writable_fields = ["total", "customer", "issued_on"]
+        approval_fields = ["status"]      # proposed by the agent, applied when a person approves
+```
+
+For models you can't edit, put the same options in `<app>/agent_tools.py` (imported at startup):
+
+```python
+tools.expose(User, fields=["username", "first_name"], owner_field="pk", name="account", plural="accounts")
+tools.register(my_langchain_tool, permission="crm.view_lead", category="crm")   # hand-written tools join the catalogue
+```
+
+**Using them:**
+
+```python
+from llm_kit import tools
+
+llm.bind_tools(tools.for_user(request.user))       # what this user may use, bound to them
+ToolNode(tools.all_tools())                        # in a graph built once: each call reads the run's caller
+llm.bind_tools(tools.for_config(config))           # inside a node: the caller the server put in config
+system_prompt += tools.guidance(bound_tools)       # one usage line per tool
+```
+
+- **The caller is set by the server.** Runs started through llm-kit's views carry `Caller(user, tenant)` in the config. The tenant comes from `TENANT_RESOLVER(user)`. Clients can't set it, it is never written to checkpoints, and a tool with no caller refuses to run.
+- **Every query and write is limited to the caller's rows.**
+  - On create, the owner and tenant are filled in by the server.
+  - A writable link only accepts rows the caller can see.
+  - A write that would move a row out of the caller's scope is rolled back.
+- **Permissions:**
+  - Django's view/add/change permissions by default; set `permission` / `write_permission` to override.
+  - Checked when tools are listed or bound, and again on every call.
+  - Anonymous users get no tools.
+- **Approvals:**
+  - `writes = "approval"`, or a change to any `approval_fields`, creates a `ToolProposal` instead of writing.
+  - `tools.pending_for(user)`, `tools.approve(p, by=user)` and `tools.reject(p, by=user, reason=...)`, plus admin actions and the JSON API. Approving refuses if the record changed since it was proposed.
+  - Signals: `proposal_created`, `proposal_decided`.
+- **Refused at startup:**
+  - Fields that look like secrets (password, token, api_key…), binary or vector columns.
+  - Writable links to users or file fields.
+  - Fields like `status`/`is_active` as direct writes.
+  - Creates that would miss a required field.
+  - A model with no declared scope.
+  - Duplicate tool names.
+  - `paused = "why"` keeps a declaration checked but hidden.
+- **Catalogue:**
+  - `GET /llm/api/tools/` lists the current user's tools with their JSON schemas.
+  - `GET /llm/api/tools/proposals/` and `POST .../<id>/approve/` or `.../<id>/reject/`.
+  - `manage.py llm_kit_tools [--user name]`.
+  - Tool calls are recorded like everything else (*Tool calls* in the admin).
+
 ## Model catalogue
 
 Metadata for ~12,600 models (prices, context limits, capabilities, modalities, release and deprecation dates), synced from **models.dev**, **OpenRouter** and **LiteLLM** into your database:
@@ -302,6 +365,7 @@ It implements the sync and async LangGraph checkpointer API: `get_tuple`, `list`
 | `CIRCUIT_BREAKER` | `{}` | `{"failures": 5, "window": 60, "cooldown": 60, "quota_cooldown": 900}` |
 | `MONITORING_PERMISSION` | staff only | dotted DRF permission class for `/llm/api/monitoring/` |
 | `METRICS_TOKEN` | `None` | bearer token for `/llm/metrics/` |
+| `TENANT_RESOLVER` | `None` | dotted path to `fn(user) -> tenant` for model tools (and call records) |
 | `REQUIRE_AUTH` | `True` | |
 | `STREAM_MODES` | `["messages", "updates"]` | LangGraph stream modes used for SSE/WebSocket runs |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |

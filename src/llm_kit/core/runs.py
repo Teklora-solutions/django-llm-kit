@@ -56,7 +56,8 @@ def build_config(thread_id: str, payload: dict[str, Any], metadata: dict[str, An
     extra = payload.get("config") or {}
     if not isinstance(extra, dict):
         raise BadRequest("'config' must be an object.")
-    configurable = dict(extra.get("configurable") or {})
+    # "__" keys are LangGraph internals and llm-kit's server-set caller: never from a client.
+    configurable = {k: v for k, v in dict(extra.get("configurable") or {}).items() if not str(k).startswith("__")}
     model = payload.get("model")
     if model is not None:
         if not isinstance(model, str):

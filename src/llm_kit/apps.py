@@ -31,6 +31,13 @@ class LLMKitConfig(AppConfig):
 
         configure_observability()
 
+        # Model tools: AgentAccess declarations, plus expose()/register() calls in apps' agent_tools.py.
+        # A bad declaration stops start-up here rather than failing at the first tool call.
+        from llm_kit.tools import registry as tool_registry
+
+        autodiscover_modules("agent_tools")
+        tool_registry.load()
+
         # Touchpoints declared next to graphs register when their module is imported.
         from llm_kit.runtime.graphs import registry
 

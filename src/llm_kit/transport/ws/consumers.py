@@ -93,7 +93,8 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             created = await self._prepare(payload)
             graph = get_graph(self.thread.graph)
             graph_input = runs.build_input(payload)
-            config = runs.build_config(self.thread, payload, self.user)
+            # Sync: TENANT_RESOLVER may query the database.
+            config = await database_sync_to_async(runs.build_config)(self.thread, payload, self.user)
         except (UnknownGraph, runs.BadRequest) as e:
             await self.send_event("error", {"message": str(e)})
             return
