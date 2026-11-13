@@ -377,7 +377,7 @@ Every graph and agent uses one checkpointer, set by `LLM_KIT["CHECKPOINTER"]`:
 | `"myapp.ai:saver"` | a saver instance, a saver class, or a zero-argument factory |
 | `{"sync": "myapp.ai:saver", "async": "myapp.ai:asaver"}` | separate factories for sync and async code; the async one may be a coroutine |
 
-A project that already has an `AsyncPostgresSaver` (as some projects already do) can point at its factory, and its existing threads keep working.
+A project that already has an `AsyncPostgresSaver` can point at its factory, and its existing threads keep working.
 
 - **One async saver per event loop.** An async connection pool belongs to the loop that opened it. A Celery task that calls `asyncio.run` gets a new loop each time, and a shared saver would fail on the second task. llm-kit makes one async saver per running loop and closes the savers of loops that have finished.
 - **Missing halves are filled in.** A sync-only saver (`PostgresSaver`) is run in a worker thread for async code. An async-only factory serves sync code from one background loop.
