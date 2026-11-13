@@ -1,0 +1,81 @@
+site_name: django-llm-kit
+site_description: LangGraph and LangChain for Django - model policies, agents and subagents, tools from your models, a model catalogue, cost tracking, monitoring and streaming APIs.
+site_url: https://teklora-solutions.github.io/django-llm-kit/
+repo_url: https://github.com/Teklora-solutions/django-llm-kit
+repo_name: Teklora-solutions/django-llm-kit
+edit_uri: edit/master/docs/
+copyright: MIT licensed
+
+exclude_docs: |
+  internal/
+
+theme:
+  name: material
+  custom_dir: docs_theme/overrides
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+  icon:
+    repo: fontawesome/brands/github
+
+hooks:
+  - docs_theme/llms.py
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Guides:
+      - Graphs: guides/graphs.md
+      - Touchpoints: guides/touchpoints.md
+      - Agents and subagents: guides/agents.md
+      - Model tools: guides/tools.md
+      - Model catalogue: guides/catalogue.md
+      - Observability: guides/observability.md
+      - Monitoring: guides/monitoring.md
+      - Checkpointers: guides/checkpointer.md
+      - Streaming and APIs: guides/streaming.md
+      - Access control: guides/access.md
+      - Testing: guides/testing.md
+      - Deployment: guides/deployment.md
+  - Reference:
+      - Settings: reference/settings.md
+      - Management commands: reference/commands.md
+      - Python API: reference/python-api.md
+  - Changelog: https://github.com/Teklora-solutions/django-llm-kit/blob/master/CHANGELOG.md

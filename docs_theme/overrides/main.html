@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  {% if page and page.file %}
+    <link rel="alternate" type="text/markdown" href="{{ base_url }}/{{ page.file.src_uri }}" title="This page as Markdown">
+  {% endif %}
+  <link rel="alternate" type="text/plain" href="{{ base_url }}/llms.txt" title="llms.txt">
+{% endblock %}
+
+{% block content %}
+  {% if page and page.file %}
+    <a href="{{ base_url }}/{{ page.file.src_uri }}" title="View this page as Markdown" class="md-content__button md-icon">
+      {% include ".icons/material/language-markdown-outline.svg" %}
+    </a>
+  {% endif %}
+  {{ super() }}
+{% endblock %}
