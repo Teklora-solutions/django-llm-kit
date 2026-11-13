@@ -9,3 +9,6 @@ build/
 .env
 .playwright-mcp/
 docs/internal/
+.show-your-work/
+.ruff_cache/
+site/

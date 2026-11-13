@@ -1,0 +1,29 @@
+name: Bug report
+description: Something doesn't work as documented.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest settings, touchpoint/agent declaration and request that show it.
+      render: python
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: django-llm-kit 0.2.0, Django 5.2, Python 3.12, langgraph 1.x, database
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Traceback or logs
+      description: Remove API keys and personal data first.
+      render: text

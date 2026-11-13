@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uvx ruff check .
+      - run: uvx ruff format --check .
+
+  test:
+    name: test (py${{ matrix.python }}, django ${{ matrix.django }}, ${{ matrix.db }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+        django: ["5.2"]
+        db: [sqlite]
+        include:
+          - { python: "3.11", django: "5.0", db: sqlite }
+          - { python: "3.12", django: "5.2", db: postgres }
+          - { python: "3.12", django: "5.2", db: postgres-checkpointer }
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: pw
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          activate-environment: true
+      - name: Install
+        run: uv pip install -e ".[dev]" "django~=${{ matrix.django }}.0"
+      - name: Test (SQLite)
+        if: matrix.db == 'sqlite'
+        run: pytest -q
+      - name: Test (Postgres)
+        if: matrix.db == 'postgres'
+        env:
+          LLM_KIT_TEST_PG: postgres://postgres:pw@localhost:5432/postgres
+        run: pytest -q
+      - name: Test (Postgres, LangGraph's PostgresSaver)
+        if: matrix.db == 'postgres-checkpointer'
+        env:
+          LLM_KIT_TEST_PG: postgres://postgres:pw@localhost:5432/postgres
+          LLM_KIT_TEST_CHECKPOINTER: postgres
+        run: pytest -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv build
+      - run: uvx twine check --strict dist/*
