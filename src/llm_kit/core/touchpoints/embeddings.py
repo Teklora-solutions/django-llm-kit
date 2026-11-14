@@ -11,8 +11,8 @@ circuit breaker and call records as chat calls::
     vectors = search.embed(["first passage", "second passage"])        # list[list[float]]
     [query] = await search.aembed("what is due?", task_type="RETRIEVAL_QUERY")
 
-Backends (``LLM_KIT["EMBEDDING_BACKEND"]``, or a touchpoint's ``backend`` when it is
-``"litellm"`` or ``"langchain"``):
+Backends: ``touchpoint(..., embedding_backend=)``, else the touchpoint's ``backend=``, else
+``LLM_KIT["EMBEDDING_BACKEND"]``. Each is a name below, a dotted path, or the factory itself:
 
 * ``litellm``: ``litellm.embedding`` / ``aembedding``. Inputs are passed as given, so a
   provider that embeds images, audio or PDFs gets the parts LiteLLM accepts for it.
@@ -142,8 +142,13 @@ _factories: dict[str, EmbedderFactory] = {}
 _lock = threading.Lock()
 
 
-def get_embedder_factory(name: str | None) -> EmbedderFactory:
+def get_embedder_factory(name: str | EmbedderFactory | None) -> EmbedderFactory:
+    """A built-in backend by name, your factory by dotted path, or your factory itself."""
+    if callable(name):
+        return name
     name = name or config.get("EMBEDDING_BACKEND") or "auto"
+    if callable(name):
+        return name
     if name == "auto":
         from llm_kit.core.touchpoints.backends import _litellm_installed
 
@@ -156,17 +161,27 @@ def get_embedder_factory(name: str | None) -> EmbedderFactory:
         if name not in _factories:
             factory = import_target(name)
             if not callable(factory):
-                raise ConfigError(f"EMBEDDING_BACKEND {name!r} is not callable.")
+                raise ConfigError(f"Embedding backend {name!r} is not callable.")
             _factories[name] = factory
     return _factories[name]
 
 
-def as_embedder(made: Any) -> Embedder:
+def as_embedder(made: Any, backend: Any = None) -> Embedder:
     if isinstance(made, Embedder):
         return made
     if hasattr(made, "embed_documents"):
         return LangChainEmbedder(made)
-    raise ConfigError(f"An embedding backend returned {type(made).__name__}, not an Embedder or LangChain Embeddings.")
+    where = f" {backend!r}" if backend else ""
+    raise ConfigError(
+        f"The embedding backend{where} returned {type(made).__name__}, not an Embedder or LangChain Embeddings. "
+        "If the touchpoint's backend= builds chat models, give its embedding factory as embedding_backend=."
+    )
+
+
+def backend_for(tp) -> Any:
+    """Which embedding backend ``tp`` uses: ``embedding_backend=``, else its ``backend=`` (a
+    built-in name, a dotted path or a factory), else ``LLM_KIT["EMBEDDING_BACKEND"]``."""
+    return getattr(tp, "embedding_backend", None) or tp.backend or None
 
 
 # ------------------------------------------------------------------ calling
@@ -214,7 +229,7 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
     resolution = tp.resolve(requested, config=config_, env=env)
     if not fallbacks:
         resolution.fallbacks = []
-    backend = tp.backend if tp.backend in ("litellm", "langchain", "auto") else None
+    backend = backend_for(tp)
     factory = get_embedder_factory(backend)
     merged = {**resolution.params, **params}
     from llm_kit.core.touchpoints.backends import key_sets
@@ -224,7 +239,7 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
         for owner, keys in key_sets(env, ref, tp):  # BYOK: the caller's keys, then the platform's
             refs.append(ref)
             owners.append(owner)
-            embedders.append(as_embedder(factory(ref, dict(merged), keys)))
+            embedders.append(as_embedder(factory(ref, dict(merged), keys), backend))
     if not embedders:
         from llm_kit.core.touchpoints.backends import no_key
 

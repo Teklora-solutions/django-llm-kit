@@ -170,3 +170,28 @@ def test_an_embedding_inside_an_agent_is_part_of_its_run(world, settings):
     call = LLMCall.objects.get(kind="embedding")
     assert (call.run_id, call.user, run.calls) == (run.run_id, str(world["alice"].pk), 1)
     assert spent["usage"] == {"gemini/gemini-embedding-2": [7, 0, 0, 0, 0]}  # counts towards a budget
+
+
+def test_a_touchpoints_own_backend_is_used_for_embeddings(settings):
+    """A dotted path (or factory) on touchpoint(backend=) or embedding_backend= wins over EMBEDDING_BACKEND."""
+    settings.LLM_KIT = {**settings.LLM_KIT, "EMBEDDING_BACKEND": "litellm"}  # would need litellm installed
+    own = touchpoint("t.embed.own", default="vertex_ai/gemini-embedding-2", backend="tests.test_embeddings:backend")
+    assert own.embed(["ab"], env=FakeEnv(), fallbacks=False) == [[2.0, 2.0, 2.0]]
+
+    made = []
+
+    def factory(ref, params, keys):
+        made.append(ref)
+        return Scripted(ref, params, keys)
+
+    chat_and_embed = touchpoint(
+        "t.embed.split",
+        default="openai/text-embedding-3-small",
+        backend="tests.graphs:fake_backend",
+        embedding_backend=factory,
+    )
+    assert chat_and_embed.embed("x", env=FakeEnv(), fallbacks=False) == [[1.0, 1.0, 1.0]] and made
+
+    wrong = touchpoint("t.embed.wrong", default="openai/text-embedding-3-small", backend="tests.graphs:fake_backend")
+    with pytest.raises(ConfigError, match="embedding_backend="):
+        wrong.embed("x", env=FakeEnv(), fallbacks=False)

@@ -66,6 +66,7 @@ class Touchpoint:
     retry: RetryPolicy | None = None  # waits before falling back; None = LLM_KIT["RETRY"]
     daily_budget: Any = None  # USD per day across all its calls; None = no limit
     settable: Any = None  # a core.scoped.Settable: what tenants and users may save for it
+    embedding_backend: Any = None  # embed()'s backend when it differs from backend=; None = backend=
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -307,13 +308,16 @@ def touchpoint(
     retry: RetryPolicy | dict | str | None = None,
     daily_budget: Any = None,
     settable: Any = None,
+    embedding_backend: Any = None,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads).
 
     ``daily_budget`` (USD) caps what all its calls may spend in a day; past it, ``model()``,
     ``complete()`` and ``embed()`` raise ``BudgetExceeded`` (``DAILY_BUDGETS["touchpoints"]``
     sets or overrides it without a deploy). ``settable`` (a ``Settable``) lets tenants and users
-    save a model choice and parameters for it (see ``llm_kit.scoped``)."""
+    save a model choice and parameters for it (see ``llm_kit.scoped``). ``embed()`` uses
+    ``embedding_backend``, else ``backend`` (a name, dotted path or factory), else
+    ``LLM_KIT["EMBEDDING_BACKEND"]``."""
     tp = Touchpoint(
         name=name,
         default=default,
@@ -327,6 +331,7 @@ def touchpoint(
         retry=retry,
         daily_budget=daily_budget,
         settable=settable,
+        embedding_backend=embedding_backend,
     )
     with _lock:
         _registry[name] = tp

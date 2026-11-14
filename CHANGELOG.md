@@ -29,6 +29,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 - `defer_tools` defaults to `None` (defer when there are more than `DEFER_TOOLS_ABOVE` tools) instead of `False`. Pass `defer_tools=False` to keep every tool bound.
 
+### Fixed
+
+- `embed()` ignored a touchpoint's dotted-path or callable `backend=` and fell back to `EMBEDDING_BACKEND`. It now uses `touchpoint(embedding_backend=)`, then `backend=`, then the setting. A factory that returns a chat model raises an error that names it (#17).
+
 ## [0.2.0] - 2026-11-14
 
 ### Added
