@@ -139,6 +139,22 @@ People send a second message before the first answer arrives. With `"queue": tru
 - A normal (not background) run may still go when nothing is running, and the queue moves on after it. If you run a thread's graph yourself, call `background.advance(thread)` afterwards.
 - Each queued message is its own turn. They aren't merged: each keeps its own id, can be cancelled on its own, and its answer follows it in the thread.
 
+### When a run finishes
+
+To message someone when their long job is done (a chat message, a push, an email) without keeping a watcher open, connect to `run_finished`:
+
+```python
+from django.dispatch import receiver
+from llm_kit.background import run_finished
+
+@receiver(run_finished)
+def tell_them(sender, run, status, result, error, **kwargs):
+    if status in ("done", "interrupted"):
+        notify(run.user, "Your report is ready.")      # your delivery
+```
+
+It is sent **once** for every background run that reaches a final status: `done`, `interrupted`, `error`, `cancelled` (also a waiting or queued run cancelled before it started) or `lost`. Whichever process notices sends it: the worker that ran it, the request that cancelled it, or the one that found it lost. When two processes notice the same lost run, only the one whose change took effect sends it, and a run that finishes after being marked lost isn't announced again. `result` is the `end` event's data (`next`, `interrupts`) for done and interrupted runs. It is sent after the change is committed. A receiver that raises is logged and doesn't stop the other receivers or the queue. Receivers run in the process that sends it, so hand slow delivery to a task queue.
+
 **Where runs execute** is `RUN_EXECUTOR`:
 
 | Value | Runs in | Notes |

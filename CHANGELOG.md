@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- `llm_kit.background.run_finished` signal (`run`, `status`, `result`, `error`): sent once per background run when it is done, interrupted, errors, is cancelled (also before it started) or is lost. It comes from whichever process notices: the worker, the canceller, or whoever marks it lost. Hook messages and push notifications to it without keeping watchers open.
+
 - Queued follow-ups: a background run started on a busy thread with `"queue": true` (`background.start(..., queue=True)`, `agents.start(..., queue=True)`, or `RUN_QUEUE`) waits as `waiting` instead of getting 409, and starts when the runs before it finish, in order. Waiting runs are listed in `llm/api/runs/` and in the watch snapshot's `queue`, and can be cancelled. Lost and cancelled runs let the queue move on. An unanswered interrupt holds it, and a `resume` never waits (migration 0017).
 
 - Background runs: start a run detached from the request (`"background": true` on SSE, REST and WebSocket runs; `agents.start()`, `background.start()`), so it keeps going when the client leaves. Anyone who may use the thread can watch it (`GET llm/runs/<id>/watch/`, WebSocket `watch`, `background.watch()`): a snapshot of where it is, then its events live. They can also cancel it from any process. `GET llm/api/runs/` lists them. Runs execute where `RUN_EXECUTOR` says: a thread (default), Celery, Django-Q2 or your own function. Their events cross processes through the Channels layer (`RUN_EVENTS`). New `BackgroundRun` table (migration 0016). A thread runs one at a time: a second run while one is going gets 409.

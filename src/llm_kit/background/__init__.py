@@ -30,6 +30,7 @@ from llm_kit.background.service import (
     waiting_runs,
     watch,
 )
+from llm_kit.background.signals import run_finished
 
 __all__ = [
     "RunBusy",
@@ -41,6 +42,7 @@ __all__ = [
     "execute",
     "get_run",
     "refresh",
+    "run_finished",
     "runs_for",
     "start",
     "waiting_runs",

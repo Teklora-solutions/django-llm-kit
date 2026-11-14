@@ -35,7 +35,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.background`
 
-`start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`. See [Background runs](../guides/streaming.md#background-runs).
+`start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`, and the signal `run_finished` (`run`, `status`, `result`, `error`; [sent once](../guides/streaming.md#when-a-run-finishes)). See [Background runs](../guides/streaming.md#background-runs).
 
 ## `llm_kit.tools`
 
