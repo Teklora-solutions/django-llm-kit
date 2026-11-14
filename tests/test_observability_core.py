@@ -127,6 +127,15 @@ def test_price_call():
         (type("BadRequestError", (Exception,), {"status_code": 400})("invalid"), "bad_request"),
         (asyncio.CancelledError(), "cancelled"),
         (ValueError("something else"), "other"),
+        # Status and Google status names only in the message, as LangChain's Google client raises them.
+        (RuntimeError("503 UNAVAILABLE. {'error': {'code': 503, 'message': 'high demand'}}"), "overloaded"),
+        (RuntimeError("{'error': {'code': 503, 'status': 'UNAVAILABLE'}}"), "overloaded"),
+        (RuntimeError("429 RESOURCE_EXHAUSTED. Try later."), "rate_limit"),
+        (RuntimeError("429 rate limit exceeded"), "rate_limit"),
+        (RuntimeError("401 API key not valid"), "auth"),
+        # Not provider statuses: lower-case "unavailable" is ordinary English.
+        (type("ModelUnavailable", (Exception,), {})("no provider is usable"), "other"),
+        (RuntimeError("asked for an unavailable tool 'run_sql'"), "other"),
     ],
 )
 def test_classify_error(exc, expected):

@@ -232,3 +232,10 @@ def test_policy_precedence(monkeypatch):
     assert t.model(env=FakeEnv(), config=run, retry="interactive").retry == RetryPolicy.INTERACTIVE
     monkeypatch.setattr(settings, "_source", lambda: {"RETRY": {"attempts": 3, "max_wait": 1}})
     assert tp().model(env=FakeEnv()).retry == RetryPolicy(3, 1.0)
+
+
+def test_a_text_only_overload_is_waited_out_briefly():
+    exc = RuntimeError(
+        "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is experiencing high demand.'}}"
+    )
+    assert retry_after(exc) == 5.0

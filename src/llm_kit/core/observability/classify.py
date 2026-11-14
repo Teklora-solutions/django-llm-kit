@@ -6,6 +6,8 @@ quota as a temporary rate limit, or parsing 429 text by hand.
 
 from __future__ import annotations
 
+import re
+
 ERROR_CLASSES = (
     "rate_limit",  # temporary; retry later
     "quota_exhausted",  # won't clear by retrying soon (billing / daily quota)
@@ -50,6 +52,24 @@ def _status(exc: BaseException) -> int | None:
     return value if isinstance(value, int) else None
 
 
+_TEXT_STATUS = (
+    re.compile(r"^\s*([45]\d\d)\b"),  # "429 RESOURCE_EXHAUSTED. ...", "503 UNAVAILABLE. ..."
+    re.compile(r"['\"]code['\"]\s*:\s*([45]\d\d)\b"),  # {'error': {'code': 503, ...}}
+)
+# Google's status names, matched case-sensitively: "unavailable" in lower case is ordinary
+# English (an exception class called ModelUnavailable is not an overloaded provider).
+_GOOGLE_RATE = re.compile(r"\bRESOURCE_EXHAUSTED\b")
+_GOOGLE_OVERLOADED = re.compile(r"\bUNAVAILABLE\b|high demand")
+
+
+def _status_in_text(message: str) -> int | None:
+    """The HTTP status a client library left only in the error message."""
+    for pattern in _TEXT_STATUS:
+        if found := pattern.search(message):
+            return int(found.group(1))
+    return None
+
+
 def classify_error(exc: BaseException) -> str:
     import asyncio
 
@@ -59,8 +79,9 @@ def classify_error(exc: BaseException) -> str:
     if type(exc).__name__ == "AllModelsFailed" and errors:
         return classify_error(errors[0][1])
     name = type(exc).__name__.lower()
-    text = f"{name} {exc}".lower()
-    status = _status(exc)
+    message = str(exc)
+    text = f"{name} {message}".lower()
+    status = _status(exc) or _status_in_text(message)
 
     if any(h in text for h in _DAILY_HINTS):
         return "quota_exhausted"
@@ -70,6 +91,7 @@ def classify_error(exc: BaseException) -> str:
         return "quota_exhausted"
     if (
         status == 429
+        or _GOOGLE_RATE.search(message)
         or "ratelimit" in name
         or "rate limit" in text
         or "rate_limit" in text
@@ -86,6 +108,7 @@ def classify_error(exc: BaseException) -> str:
         return "content_filter"
     if (
         status in (500, 502, 503, 529)
+        or _GOOGLE_OVERLOADED.search(message)
         or "overloaded" in text
         or "serviceunavailable" in name
         or "internalserver" in name
