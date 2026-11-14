@@ -31,7 +31,17 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 
-from llm_kit.core.agents.deferral import FIND_TOOLS, find_tools_tool, found_reply, match, union
+from llm_kit.core.agents.deferral import (
+    FIND_TOOLS,
+    find_tools_tool,
+    found_reply,
+    keep_loaded,
+    match,
+    overview,
+    semantic_ranker,
+    should_defer,
+    union,
+)
 from llm_kit.core.agents.delegate import (
     DELEGATE,
     Refused,
@@ -152,8 +162,8 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         return stop
     tools = resolve_tools(spec, config, env)
     deferred = []
-    if spec.defer_tools:
-        loaded = {*spec.essential, *(state.get("loaded_tools") or [])}
+    if should_defer(spec.defer_tools, len(tools)):
+        loaded = {*spec.essential, *keep_loaded(state.get("loaded_tools") or [])}
         deferred = [t for t in tools if t.name not in loaded]
     subagents = available(spec, config, env)
     last = model_steps(state.get("messages") or []) + 1 >= spec.max_steps
@@ -161,7 +171,8 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
     guidance = env.guidance(step.bound)
     if deferred:
         guidance = (guidance + "\n" if guidance else "") + (
-            f"- {len(deferred)} more tools are available: call `{FIND_TOOLS}` with what you need to load them."
+            f"- {len(deferred)} more tools are available ({overview(deferred)}): "
+            f"call `{FIND_TOOLS}` with what you need to load them."
         )
     step.prompt = build_prompt(
         spec,
@@ -239,9 +250,19 @@ def _failed(call, exc: Exception) -> ToolMessage:
 
 
 def _find(call, step: Step) -> tuple[ToolMessage, list[str]]:
-    found = match(str((call.get("args") or {}).get("query") or ""), step.deferred)
-    reply = found_reply(found, len(step.deferred))
+    args = call.get("args") or {}
+    category = args.get("category") or None
+    found = match(str(args.get("query") or ""), step.deferred, category=category, ranker=semantic_ranker())
+    reply = found_reply(found, step.deferred, category)
     return ToolMessage(content=reply, tool_call_id=call["id"], name=FIND_TOOLS), [t.name for t in found]
+
+
+async def _afind(call, step: Step) -> tuple[ToolMessage, list[str]]:
+    from llm_kit.core import config as settings
+
+    if settings.get("TOOL_SEARCH_TOUCHPOINT"):  # embeds (a network call): off the event loop
+        return await asyncio.to_thread(_find, call, step)
+    return _find(call, step)
 
 
 def _calls(state) -> tuple[AIMessage, list]:
@@ -338,7 +359,7 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
 
         async def one(call):
             if call["name"] == FIND_TOOLS and step.deferred:
-                message, names = _find(call, step)
+                message, names = await _afind(call, step)
                 loaded.extend(names)
                 return message
             tool = available_tools.get(call["name"])

@@ -74,4 +74,6 @@ class Command(BaseCommand):
             text = "chosen per run" if spec.tools else "none"
         if spec.defer_tools:
             text += f"  (loaded on demand; from the start: {', '.join(spec.essential) or 'none'})"
+        elif spec.defer_tools is None:
+            text += "  (loaded on demand when there are many)"
         return text

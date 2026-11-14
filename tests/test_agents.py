@@ -62,7 +62,7 @@ def tool_replies(result):
         ("t.a", {"description": "x", "touchpoint": "t", "tools": "find_invoices"}, "tools must be a list"),
         ("t.a", {"description": "x", "touchpoint": "t", "tools": [42]}, "not a tool"),
         ("t.a", {"description": "x", "touchpoint": "t", "max_steps": 0}, "at least 1"),
-        ("t.a", {"description": "x", "touchpoint": "t", "essential": ["x"]}, "defer_tools"),
+        ("t.a", {"description": "x", "touchpoint": "t", "essential": ["x"], "defer_tools": False}, "defer_tools"),
         ("t.a", {"description": "x", "touchpoint": "t", "output": dict}, "pydantic"),
     ],
 )
@@ -429,13 +429,47 @@ def test_deferred_tools_load_when_found(world, scripts, temp_agents):
     result = agents.run("t.lazy", "overdue?", user=world["alice"], thread_id="lazy-1")
     first, second = seen(A)[0], seen(A)[1]
     assert set(first["tools"]) == {"whoami", "find_tools"}
-    assert "more tools are available: call `find_tools`" in first["system"]
+    assert "8 more tools are available (testapp (8)): call `find_tools`" in first["system"]
     assert "find_invoices" in tool_replies(result)[0]
     assert {"find_invoices", "save_invoice"} <= set(second["tools"])  # loaded for the next step
     assert "A-1" in tool_replies(result)[1]
     # Loaded tools stay loaded in the thread.
     agents.run("t.lazy", "again", user=world["alice"], thread_id=result.thread_id)
     assert "find_invoices" in seen(A)[-1]["tools"]
+
+
+def test_many_tools_are_deferred_without_declaring_it(world, scripts, temp_agents, settings):
+    from llm_kit import tools
+
+    temp_agents("t.many", touchpoint="tests.assistant", tools=tools.select(categories=["testapp"]))
+    scripts[A] = ["hi"]
+    agents.run("t.many", "x", user=world["alice"])
+    assert "find_tools" not in seen(A)[-1]["tools"]  # 9 tools: under DEFER_TOOLS_ABOVE
+
+    settings.LLM_KIT = {**settings.LLM_KIT, "DEFER_TOOLS_ABOVE": 5}
+    scripts[A] = ["hi"]
+    agents.run("t.many", "x", user=world["alice"])
+    assert set(seen(A)[-1]["tools"]) == {"find_tools"}
+
+    temp_agents("t.never", touchpoint="tests.assistant", tools=tools.select(categories=["testapp"]), defer_tools=False)
+    scripts[A] = ["hi"]
+    agents.run("t.never", "x", user=world["alice"])
+    assert "find_tools" not in seen(A)[-1]["tools"]
+
+
+def test_only_the_most_recently_found_tools_stay_loaded(world, scripts, temp_agents, settings):
+    from llm_kit import tools
+
+    settings.LLM_KIT = {**settings.LLM_KIT, "MAX_LOADED_TOOLS": 2}
+    temp_agents("t.lazy", touchpoint="tests.assistant", tools=tools.select(categories=["testapp"]), defer_tools=True)
+    scripts[A] = [
+        call("find_tools", {"query": "invoices"}),
+        call("find_tools", {"query": "notes"}),
+        "done",
+    ]
+    agents.run("t.lazy", "x", user=world["alice"])
+    last = set(seen(A)[-1]["tools"]) - {"find_tools"}
+    assert len(last) == 2 and all("note" in name for name in last)
 
 
 # ------------------------------------------------------------- command and admin

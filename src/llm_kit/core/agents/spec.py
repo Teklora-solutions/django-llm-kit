@@ -62,8 +62,8 @@ class AgentSpec:
     output: type[BaseModel] | None = None
     max_steps: int = DEFAULT_MAX_STEPS
     fork: bool = False
-    defer_tools: bool = False
-    essential: tuple[str, ...] = ()  # with defer_tools: the tools bound from the start
+    defer_tools: bool | None = None  # None: when it has more than DEFER_TOOLS_ABOVE tools
+    essential: tuple[str, ...] = ()  # when deferring: the tools bound from the start
     history: int | None = None  # tokens of conversation sent to the model (newest kept); None = all
     tool_result_chars: int | None = None  # each tool result cut to this many characters; None = no cap
     code: Callable[..., Any] | None = None
@@ -97,8 +97,10 @@ class AgentSpec:
             raise ConfigError(f"Agent {self.name!r}: give a touchpoint (its model policy).")
         if not (isinstance(self.prompt, str) or callable(self.prompt)):
             raise ConfigError(f"Agent {self.name!r}: prompt must be a string or fn(ctx) -> str.")
-        if self.essential and not self.defer_tools:
-            raise ConfigError(f"Agent {self.name!r}: essential= only applies with defer_tools=True.")
+        if self.essential and self.defer_tools is False:
+            raise ConfigError(
+                f"Agent {self.name!r}: essential= only applies when tools are deferred, not defer_tools=False."
+            )
         tools = self.tools
         if tools is not None and not callable(tools):
             if isinstance(tools, (str, BaseTool)) or not isinstance(tools, Sequence):
@@ -167,7 +169,7 @@ def agent(
     output: type[BaseModel] | None = None,
     max_steps: int = DEFAULT_MAX_STEPS,
     fork: bool = False,
-    defer_tools: bool = False,
+    defer_tools: bool | None = None,
     essential: Sequence[str] = (),
     history: int | None = None,
     tool_result_chars: int | None = None,
@@ -186,6 +188,7 @@ def agent(
         max_steps: model calls per turn; on the last one it is told to answer.
         fork: as a subagent, start from a copy of the parent's conversation instead of only the task.
         defer_tools: bind only ``essential`` tools plus ``find_tools``; the rest load when found.
+            None (default): defer when the agent can use more than ``DEFER_TOOLS_ABOVE`` tools.
         history: about how many tokens of the conversation each model call sees, newest first,
             always starting at a user message (the checkpoint keeps everything). None: all of it.
         tool_result_chars: cut each tool result to this many characters, with a note saying so
