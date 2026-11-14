@@ -33,6 +33,9 @@ DEFAULTS: dict[str, Any] = {
     # init_chat_model), "litellm", "langchain", or a dotted path to
     # fn(ref: str, params: dict, api_keys: list[str]) -> BaseChatModel.
     "MODEL_BACKEND": "auto",
+    # Embeddings (touchpoint.embed): "auto", "litellm", "langchain", or a dotted path to
+    # fn(ref, params, api_keys) -> Embedder | LangChain Embeddings.
+    "EMBEDDING_BACKEND": "auto",
     # Extra kwargs for litellm.Router when a provider has several keys.
     "LITELLM_ROUTER": {"routing_strategy": "simple-shuffle", "num_retries": 0},
     # Waiting out a short rate limit (or overload) on a model before falling back to the next:

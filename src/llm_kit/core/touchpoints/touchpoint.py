@@ -167,6 +167,48 @@ class Touchpoint:
         reply = await _as_run(llm).ainvoke(messages, run_config)
         return parse_as(_text(reply), schema)
 
+    # ----------------------------------------------------------- embeddings
+
+    def embed(
+        self,
+        inputs: Any,
+        *,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        **params: Any,
+    ) -> list[list[float]]:
+        """Embed ``inputs`` (a string, or a list of strings or media parts): one vector each.
+
+        Same resolution, keys, fallbacks, retry waits and call records as chat calls; see
+        ``llm_kit.core.touchpoints.embeddings``. ``params`` (e.g. ``dimensions``) go to the backend."""
+        from llm_kit.core.touchpoints import embeddings
+
+        call, items = embeddings.prepare(
+            self, inputs, requested=requested, config_=config, env=env, retry=retry, fallbacks=fallbacks, params={}
+        )
+        return embeddings.run_sync(call, items, params)
+
+    async def aembed(
+        self,
+        inputs: Any,
+        *,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        **params: Any,
+    ) -> list[list[float]]:
+        from llm_kit.core.touchpoints import embeddings
+
+        call, items = embeddings.prepare(
+            self, inputs, requested=requested, config_=config, env=env, retry=retry, fallbacks=fallbacks, params={}
+        )
+        return await embeddings.run_async(call, items, params)
+
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 

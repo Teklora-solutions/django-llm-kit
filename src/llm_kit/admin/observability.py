@@ -33,6 +33,7 @@ class LLMCallAdmin(_ReadOnly):
         "outcome",
     )
     list_filter = (
+        "kind",
         "status",
         "error_class",
         "chosen_by",

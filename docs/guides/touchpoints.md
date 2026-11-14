@@ -99,6 +99,37 @@ Set `LLM_KIT["MODEL_BACKEND"]`, or `touchpoint(..., backend=…)` for one touchp
 | `"langchain"` | `init_chat_model` with the provider's `langchain-*` package |
 | `"myapp.ai:build"` | your own `fn(ref, params, api_keys) -> BaseChatModel` |
 
+## Embeddings
+
+A touchpoint can embed as well as chat. Embedding calls go through the same resolution, admin overrides, API keys, fallbacks, retry waits and circuit breaker, and are recorded as calls with `kind="embedding"`:
+
+```python
+search = touchpoint(
+    "search.embed",
+    default="gemini/gemini-embedding-2",
+    fallbacks=["openai/text-embedding-3-small"],
+    params={"dimensions": 768},
+    requires={"kind": "embedding"},
+)
+
+vectors = search.embed(["first passage", "second passage"])    # list[list[float]], one per input
+[query] = await search.aembed("what is overdue?", task_type="RETRIEVAL_QUERY")
+```
+
+- `embed()` takes one input or a list. Keyword arguments, such as `dimensions` or a provider's task type, go to the backend for that call.
+- `requires={"kind": "embedding", "input": ["image"]}` keeps fallbacks to embedding models that accept images, according to the catalogue.
+- Fallbacks only make sense between models with the same output size: vectors from different models can't be compared. Pin `dimensions`, or use `fallbacks=False` for a call whose vectors go into an existing index.
+- Inside a running agent, the call is recorded in its run and counts towards its [budget](agents.md#budgets).
+
+Embeddings have their own backend setting, `LLM_KIT["EMBEDDING_BACKEND"]`:
+
+| Backend | How embeddings are made |
+|---|---|
+| `"auto"` (default) | `litellm` when installed, otherwise `langchain` |
+| `"litellm"` | `litellm.embedding` / `aembedding`. Inputs are passed as given, so media parts reach providers that embed images, audio or PDFs, in the form LiteLLM accepts for that provider |
+| `"langchain"` | `init_embeddings` with the provider's `langchain-*` package; text only |
+| `"myapp.ai:embedder"` | your own `fn(ref, params, api_keys)` returning a LangChain `Embeddings`, or an object with `embed(inputs, **params)` and `aembed(...)` that return `Embedded(vectors, input_tokens)` (from `llm_kit.core.touchpoints.embeddings`). Use this for a provider SDK's multimodal inputs |
+
 ## API keys
 
 Keys are looked up in this order:
