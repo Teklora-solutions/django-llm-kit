@@ -11,6 +11,7 @@ Client -> server::
     {"type": "run", "resume": {"approved": true}}         # answer an interrupt
     {"type": "run", "graph": "chat"}                      # (new-thread route) pick a graph
     {"type": "run", "message": "hi", "background": true} # start detached, and watch it
+    {"type": "run", "message": "hi", "queue": true}      # the same, waiting its turn if busy
     {"type": "watch", "run": "<run id>"}                  # watch a background run
     {"type": "cancel"}                                    # stop the run (or the one watched)
 
@@ -94,7 +95,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             return
         if kind == "watch":
             self.task = asyncio.create_task(self._watch(content.get("run")))
-        elif content.get("background") is True:
+        elif content.get("background") is True or content.get("queue") is True:
             self.task = asyncio.create_task(self._start_background(content))
         else:
             self.task = asyncio.create_task(self._run(content))
@@ -124,11 +125,12 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
     async def _start_background(self, payload):
         from llm_kit import background
 
-        payload = {k: v for k, v in payload.items() if k not in ("type", "background")}
+        queue = payload.get("queue")
+        payload = {k: v for k, v in payload.items() if k not in ("type", "background", "queue")}
         try:
             created = await self._prepare(payload)
             owner = await database_sync_to_async(access.owner_from_scope)(self.scope)
-            run = await background.astart(self.thread, payload, owner)
+            run = await background.astart(self.thread, payload, owner, queue=queue if isinstance(queue, bool) else None)
         except background.RunBusy as e:
             await self.send_event("busy", {"message": str(e), "run": e.run.to_json() if e.run else None})
             return
@@ -182,6 +184,14 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             return
         if created:
             await self.send_event("thread", {"id": self.thread.thread_id, "graph": self.thread.graph})
+        last = None
         async for item in runs.astream_run(graph, graph_input, config):
-            await self.send_event(item["event"], item["data"])
+            if last is not None:
+                await self.send_event(last["event"], last["data"])
+            last = item
         await database_sync_to_async(self.thread.save)(update_fields=["updated_at"])
+        from llm_kit.background.service import aadvance
+
+        await aadvance(self.thread)  # a run queued meanwhile may start now
+        if last is not None:  # end (or error) last: once a client sees it, the connection takes a new run
+            await self.send_event(last["event"], last["data"])

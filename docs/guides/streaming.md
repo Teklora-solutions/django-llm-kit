@@ -25,6 +25,7 @@ The same body for SSE, the REST `runs` action and WebSocket `run` messages:
 | `config` | `{"recursion_limit": …, "configurable": {…}}`; `thread_id` is always forced to the thread's own id, and keys starting with `__` are dropped |
 | `graph`, `title` | when creating a new thread |
 | `background` | `true` starts the run [in the background](#background-runs) |
+| `queue` | `true`: a background run that [waits its turn](#queued-follow-ups) on a busy thread instead of being refused |
 
 ## Events
 
@@ -112,21 +113,31 @@ from llm_kit import agents, background
 
 run = agents.start("crm.researcher", "Audit last month's invoices", user=request.user)
 run = background.start(thread, {"message": "…"}, user=request.user)   # any graph
-run.status   # queued, running, then interrupted, done, error, cancelled or lost
+run.status   # (waiting,) queued, running, then interrupted, done, error, cancelled or lost
 run.cancel()
 ```
 
-Bad payloads and callers over a daily budget are refused when you start it (400, 429). A thread runs one at a time: starting another, or a normal run, while one is going is refused (409, `RunBusy`, WebSocket `busy`) with the run in progress.
+Bad payloads and callers over a daily budget are refused when you start it (400, 429). A thread runs one at a time: starting another, or a normal run, while one is going is refused (409, `RunBusy`, WebSocket `busy`) with the run in progress, unless you [queue it](#queued-follow-ups).
 
 **Watching** (`GET llm/runs/<id>/watch/`, WebSocket `watch`, or `async for event in background.watch(run)`) gives:
 
-1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`) and the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far;
+1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`), the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far, and the runs waiting on the thread (`queue`);
 2. the run's events from then on, the same as a normal run's (`token`, `message`, `update`, `interrupt`, `end`, `error`);
 3. a final `status` event once it has finished; the stream then closes.
 
 Events aren't stored. A watcher who joins mid-reply sees the rest of that reply's tokens, and the whole message in the next snapshot. A slow watcher misses tokens rather than slowing the run; it never misses other events. Reconnecting gives a new snapshot.
 
 A run that ends at an `interrupt()` has status `interrupted` with the question in `result.interrupts`. Answer with a new run on the thread: `{"resume": …}`, in the background or not.
+
+### Queued follow-ups
+
+People send a second message before the first answer arrives. With `"queue": true` (or `background.start(..., queue=True)`, `agents.start(..., queue=True)`, or `RUN_QUEUE = True` for every background run), a run on a busy thread isn't refused. It is saved as `waiting` and starts when the runs before it have finished, in the order they were sent. `"queue": true` implies `"background": true`.
+
+- Waiting runs show in `GET llm/api/runs/?status=waiting` and in every snapshot's `queue`. Watching one gives its snapshot, then its events once it starts.
+- Cancel a waiting run like any other; it never starts. The runs behind it move up.
+- A run that ends `done`, `error`, `cancelled` or `lost` lets the next one start. A run that ends `interrupted` holds the queue until the interrupt is answered. A `resume` never waits in the queue: it answers the interrupt, and the queue moves on when it finishes.
+- A normal (not background) run may still go when nothing is running, and the queue moves on after it. If you run a thread's graph yourself, call `background.advance(thread)` afterwards.
+- Each queued message is its own turn. They aren't merged: each keeps its own id, can be cancelled on its own, and its answer follows it in the thread.
 
 **Where runs execute** is `RUN_EXECUTOR`:
 

@@ -37,6 +37,7 @@ class RunSerializer(serializers.Serializer):
     model = serializers.CharField(required=False)
     config = serializers.DictField(required=False)
     background = serializers.BooleanField(required=False, default=False)
+    queue = serializers.BooleanField(required=False, allow_null=True, default=None)
 
 
 class TouchpointSerializer(serializers.Serializer):

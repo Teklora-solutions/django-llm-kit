@@ -321,6 +321,7 @@ def start(
     tenant: Any = None,
     thread=None,
     model: str | None = None,
+    queue: bool | None = None,
 ):
     """Start agent ``name`` on ``task`` in the background and return the ``BackgroundRun`` at once.
 
@@ -328,7 +329,8 @@ def start(
     ``agents.watch(run)`` or ``llm/runs/<id>/watch/``, stop it with ``run.cancel()``. Without
     ``thread`` a new thread is made for it (a background run's state is always kept, so
     watchers can see where it is). Refused at once (``BudgetExceeded``) when the caller is over
-    a daily budget, and with ``RunBusy`` when ``thread`` already has a run in progress.
+    a daily budget, and with ``RunBusy`` when ``thread`` already has a run in progress, unless
+    ``queue=True``: then it waits its turn and starts when the runs before it have finished.
     """
     from llm_kit import background
     from llm_kit.models import Thread
@@ -348,7 +350,7 @@ def start(
     payload: dict[str, Any] = {"message": task}
     if model is not None:
         payload["model"] = model
-    return background.start(thread, payload, owner)
+    return background.start(thread, payload, owner, queue=queue)
 
 
 async def astart(name: str, task: str, **kwargs):

@@ -104,6 +104,9 @@ DEFAULTS: dict[str, Any] = {
     # ("auto": the Channels layer when CHANNEL_LAYERS is set, else "local" to this process),
     # and after how many seconds without a heartbeat a running run counts as lost.
     "RUN_EXECUTOR": "thread",
+    # A background run started on a busy thread waits its turn instead of being refused (409);
+    # per call: "queue": true/false, start(..., queue=).
+    "RUN_QUEUE": False,
     "RUN_EVENTS": "auto",
     "RUN_LOST_AFTER": 60,
 }

@@ -5,7 +5,8 @@
     GET  /runs/<uuid>/watch/            watch a background run
 
 With ``"background": true`` in the body the run is started detached: the response streams it
-(``run``, ``snapshot``, then its events) but closing the connection leaves it running.
+(``run``, ``snapshot``, then its events) but closing the connection leaves it running. With
+``"queue": true`` (a background run too) a busy thread doesn't refuse it: it waits its turn.
 
 Body: see ``llm_kit.runtime.runs``. With session auth, send the ``X-CSRFToken`` header.
 """
@@ -97,11 +98,12 @@ async def stream(request, thread_id=None):
 
     from llm_kit import background
 
-    detached = body.pop("background", False) is True
+    queue = body.pop("queue", None)
+    detached = body.pop("background", False) is True or queue is True
     try:
         thread, created, owner = await sync_to_async(_resolve_thread)(thread_id, request, body)
         if detached:
-            run = await background.astart(thread, body, owner)
+            run = await background.astart(thread, body, owner, queue=queue if isinstance(queue, bool) else None)
         else:
             if (busy := await sync_to_async(_active_run)(thread)) is not None:
                 raise background.RunBusy(busy)
@@ -136,6 +138,7 @@ async def stream(request, thread_id=None):
         async for item in runs.astream_run(graph, payload_input, config):
             yield item
         await Thread.objects.filter(pk=thread.pk).aupdate(updated_at=timezone.now())
+        await background.aadvance(thread)  # a run queued meanwhile may start now
 
     return _event_stream(events())
 

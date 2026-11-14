@@ -31,11 +31,11 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 `run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
 
-`start(name, task, *, user=None, tenant=None, thread=None, model=None) -> BackgroundRun`, `astart(...)`, `watch(run)`: run an agent [in the background](../guides/streaming.md#background-runs).
+`start(name, task, *, user=None, tenant=None, thread=None, model=None, queue=None) -> BackgroundRun`, `astart(...)`, `watch(run)`: run an agent [in the background](../guides/streaming.md#background-runs).
 
 ## `llm_kit.background`
 
-`start(thread, payload, owner=None, *, user=None, tenant=None) -> BackgroundRun`, `astart(...)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`. See [Background runs](../guides/streaming.md#background-runs).
+`start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`. See [Background runs](../guides/streaming.md#background-runs).
 
 ## `llm_kit.tools`
 

@@ -18,7 +18,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from llm_kit.models import BackgroundRun, Thread
-from llm_kit.models.runs import ACTIVE, FINISHED
+from llm_kit.models.runs import ACTIVE, FINISHED, WAITING
 from llm_kit.runtime import access, runs
 
 logger = logging.getLogger("llm_kit")
@@ -72,48 +72,132 @@ def active_run(thread: Thread) -> BackgroundRun | None:
     return None
 
 
+def waiting_runs(thread: Thread):
+    """The runs waiting their turn on ``thread``, in the order they will start."""
+    return BackgroundRun.objects.filter(thread=thread, status=WAITING).order_by("created_at")
+
+
 def start(
-    thread: Thread, payload: dict[str, Any], owner: Any = None, *, user=None, tenant: Any = None
+    thread: Thread,
+    payload: dict[str, Any],
+    owner: Any = None,
+    *,
+    user=None,
+    tenant: Any = None,
+    queue: bool | None = None,
 ) -> BackgroundRun:
     """Start a run of ``thread``'s graph in the background and return it at once.
 
     ``payload`` is the usual run payload (``message``, ``input``, ``resume``, ``model``,
     ``config``). The run acts for ``owner`` (an ``access.Owner``) or ``user``/``tenant``.
     A bad payload (``runs.BadRequest``) or a caller over budget (``BudgetExceeded``) is
-    refused here, before anything starts; a thread with a run in progress raises ``RunBusy``.
+    refused here, before anything starts.
+
+    A thread runs one run at a time. When it is busy, the run is refused (``RunBusy``), or
+    with ``queue=True`` (default ``LLM_KIT["RUN_QUEUE"]``) saved as ``waiting`` and started
+    when the runs before it have finished, in order. A ``resume`` never waits: it answers the
+    interrupt the thread is stopped at, and a queue doesn't move past an unanswered interrupt.
     """
     from llm_kit import conf
 
     owner = _owner(owner, user=user, tenant=tenant)
     payload = dict(payload or {})
+    if queue is None:
+        queue = bool(conf.get("RUN_QUEUE"))
+    if "resume" in payload:
+        queue = False
     runs.validate_choice(thread.graph, payload.get("model"))
     runs.build_input(payload)
     runs.build_config(thread, payload, owner=owner)  # budgets, the config's shape
-    if (busy := active_run(thread)) is not None:
-        raise RunBusy(busy)
     executor = str(conf.get("RUN_EXECUTOR"))
     from llm_kit.background import executors
 
     submit = executors.get_executor(executor)  # an unknown executor fails before the row exists
+    fields = {
+        "thread": thread,
+        "graph": thread.graph,
+        "payload": _clean_payload(payload),
+        "user": owner.user if owner.is_authenticated else None,
+        "session_key": "" if owner.is_authenticated else owner.visitor_id,
+        "tenant": owner.tenant_id,
+        "executor": executor,
+    }
+    busy = active_run(thread)
+    if queue and (busy is not None or waiting_runs(thread).exists()):
+        return _enqueue(fields)
+    if busy is not None:
+        raise RunBusy(busy)
     try:
         with transaction.atomic():
-            run = BackgroundRun.objects.create(
-                thread=thread,
-                graph=thread.graph,
-                payload=_clean_payload(payload),
-                user=owner.user if owner.is_authenticated else None,
-                session_key="" if owner.is_authenticated else owner.visitor_id,
-                tenant=owner.tenant_id,
-                executor=executor,
-            )
-    except IntegrityError:
+            run = BackgroundRun.objects.create(**fields)
+    except IntegrityError:  # another run started in between
+        if queue:
+            return _enqueue(fields)
         raise RunBusy(active_run(thread)) from None
     transaction.on_commit(lambda: submit(run.run_id))
     return run
 
 
+def _enqueue(fields: dict) -> BackgroundRun:
+    run = BackgroundRun.objects.create(**fields, status=WAITING)
+    thread_id = run.thread_id
+    # The run in front may have finished while this was saved: then nothing would move the queue.
+    transaction.on_commit(lambda: advance(thread_id))
+    return run
+
+
+def advance(thread) -> BackgroundRun | None:
+    """Start the thread's next waiting run if nothing runs there (and it isn't stopped at an
+    interrupt). Called whenever a run finishes; call it yourself after a run you made without
+    ``llm_kit.background`` (the views do). Returns the run started, if any."""
+    from llm_kit import conf
+    from llm_kit.background import executors
+
+    thread_id = getattr(thread, "pk", thread)
+    nxt = BackgroundRun.objects.filter(thread_id=thread_id, status=WAITING).order_by("created_at").first()
+    if nxt is None:
+        return None
+    thread = Thread.objects.get(pk=thread_id)
+    if active_run(thread) is not None or _at_interrupt(thread):
+        return None
+    executor = str(conf.get("RUN_EXECUTOR"))
+    try:
+        with transaction.atomic():
+            moved = BackgroundRun.objects.filter(pk=nxt.pk, status=WAITING).update(status="queued", executor=executor)
+    except IntegrityError:  # something else started on the thread first
+        return None
+    if not moved:  # cancelled, or moved by someone else
+        return None
+    nxt.status, nxt.executor = "queued", executor
+    submit = executors.get_executor(executor)
+    transaction.on_commit(lambda: submit(nxt.run_id))
+    return nxt
+
+
+def _at_interrupt(thread: Thread) -> bool:
+    try:
+        from llm_kit.runtime.graphs import get_graph
+
+        return bool(get_graph(thread.graph).get_state(thread.config).interrupts)
+    except Exception:
+        logger.warning("Could not read the state of thread %s", thread.pk, exc_info=True)
+        return False
+
+
+def _finished(run: BackgroundRun) -> None:
+    """After ``run`` reached a final status: the next waiting run on its thread may start."""
+    try:
+        advance(run.thread_id)
+    except Exception:
+        logger.exception("Could not start the next run on thread %s", run.thread_id)
+
+
 async def astart(thread: Thread, payload: dict[str, Any], owner: Any = None, **kw) -> BackgroundRun:
     return await sync_to_async(start)(thread, payload, owner, **kw)
+
+
+async def aadvance(thread) -> BackgroundRun | None:
+    return await sync_to_async(advance)(thread)
 
 
 # ------------------------------------------------------------------ running
@@ -187,6 +271,7 @@ async def aexecute(run_id: str) -> None:
     await Thread.objects.filter(pk=run.thread_id).aupdate(updated_at=timezone.now())
     run = await BackgroundRun.objects.aget(pk=run.pk)
     await bus.publish(run.run_id, _status_event(run))
+    await sync_to_async(_finished)(run)
 
 
 async def _watchdog(run_id: str, task: asyncio.Task | None) -> None:
@@ -213,14 +298,20 @@ def _status_event(run: BackgroundRun) -> dict:
 
 
 def cancel(run: BackgroundRun) -> bool:
-    """Ask ``run`` to stop. False when it had already finished."""
+    """Ask ``run`` to stop (or, waiting, not to start). False when it had already finished."""
     from llm_kit.background import executors
 
+    if BackgroundRun.objects.filter(pk=run.pk, status=WAITING).update(
+        status="cancelled", cancel_requested=True, ended_at=timezone.now()
+    ):
+        run.status, run.cancel_requested = "cancelled", True
+        return True
     # Not picked up yet: it ends here (a worker that takes it later finds it cancelled).
     if BackgroundRun.objects.filter(pk=run.pk, status="queued").update(
         status="cancelled", cancel_requested=True, ended_at=timezone.now()
     ):
         run.status, run.cancel_requested = "cancelled", True
+        _finished(run)
         return True
     updated = BackgroundRun.objects.filter(pk=run.pk, status="running").update(cancel_requested=True)
     if updated:
@@ -238,8 +329,10 @@ def _is_lost(run: BackgroundRun) -> bool:
 
 
 def _mark_lost(run: BackgroundRun) -> None:
-    BackgroundRun.objects.filter(pk=run.pk, status="running").update(status="lost", ended_at=timezone.now())
+    marked = BackgroundRun.objects.filter(pk=run.pk, status="running").update(status="lost", ended_at=timezone.now())
     run.status = "lost"
+    if marked:
+        _finished(run)
 
 
 def refresh(run: BackgroundRun) -> BackgroundRun:
@@ -276,7 +369,11 @@ async def _snapshot(run: BackgroundRun) -> dict:
         state = runs.state_to_json(await get_graph(run.graph).aget_state(thread.config))
     except Exception:
         logger.warning("Could not read the state of thread %s", run.thread_id, exc_info=True)
-    return {"event": "snapshot", "data": {"run": run.to_json(), "state": state}}
+    queue = [
+        r.to_json()
+        async for r in BackgroundRun.objects.filter(thread_id=run.thread_id, status=WAITING).order_by("created_at")
+    ]
+    return {"event": "snapshot", "data": {"run": run.to_json(), "state": state, "queue": queue}}
 
 
 async def watch(run: BackgroundRun) -> AsyncIterator[dict]:
