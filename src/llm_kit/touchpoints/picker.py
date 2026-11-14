@@ -8,18 +8,19 @@ from llm_kit.core.touchpoints.touchpoint import Touchpoint
 from llm_kit.touchpoints.env import DjangoEnv
 
 
-def allowed_models(tp: Touchpoint, *, limit: int = 200) -> list:
+def allowed_models(tp: Touchpoint, *, limit: int = 200, choice: ClientChoice | None = None) -> list:
     """Catalogue rows a client may choose for ``tp`` (empty for ``ServerChoice``).
 
     Same checks as resolution: allow patterns (code and admin), capabilities,
-    price caps, not hidden, and an API key configured.
+    price caps, not hidden, and an API key configured. ``choice`` replaces the
+    touchpoint's own (the bounds of a saved choice, ``llm_kit.scoped``).
     """
     from llm_kit import catalogue
 
-    if not isinstance(tp.choice, ClientChoice):
+    choice = choice or tp.choice
+    if not isinstance(choice, ClientChoice):
         return []
     env = DjangoEnv()
-    choice = tp.choice
     ov = env.override(tp.name)
     qs = catalogue.search(
         kind=tp.requires.get("kind", "chat"),

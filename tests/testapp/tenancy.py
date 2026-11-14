@@ -24,3 +24,8 @@ def workspace_for(user, request=None, scope=None):
     if int(picked) not in mine:
         raise PermissionDenied("Not a member of that workspace.")
     return int(picked)
+
+
+def can_manage(user, tenant):
+    """Who may change a tenant's scoped settings, for tests: alice."""
+    return user.username == "alice"

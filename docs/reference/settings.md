@@ -31,6 +31,7 @@ LLM_KIT = {
 |---|---|---|
 | `REQUIRE_AUTH` | `True` | every endpoint needs a signed-in user; `False` lets visitors chat on their own threads |
 | `ADOPT_SESSION_THREADS` | `True` | move a visitor's threads to their account when they sign in |
+| `SCOPE_PERMISSIONS` | `{}` | who may change each scope's saved settings: `{"platform" \| "tenant" \| "user": "dotted.path:fn(user, tenant) -> bool"}` ([details](../guides/settings.md#who-may-change-what)) |
 | `TENANT_RESOLVER` | `None` | dotted path to `fn(user) -> tenant`, or `fn(user, request=None, scope=None)` to pick a tenant per request ([users in several tenants](../guides/access.md#users-in-several-tenants)); scopes threads, model tools and call records |
 
 ## Models and keys

@@ -38,6 +38,12 @@ class DjangoEnv:
 
         return api_keys(provider)
 
+    def for_caller(self, caller):
+        """This env, applying what ``caller``'s tenant and user saved (touchpoints with ``settable``)."""
+        from llm_kit.scoped.env import ScopedEnv
+
+        return ScopedEnv(self, caller)
+
     def circuit_open(self, provider: str) -> bool:
         from llm_kit.monitoring.breaker import breaker
 

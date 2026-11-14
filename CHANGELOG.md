@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Scoped settings: `touchpoint(..., settable=Settable(model=..., params=...))` lets tenants and users save a model choice and parameters, kept within the touchpoint's choice. `llm_kit.scoped.register(Setting(...))` and `scoped.value()` add your own settings. `SCOPE_PERMISSIONS` decides who may change each scope. `GET/PATCH/DELETE llm/api/settings/` describes and saves them for UIs. New `ScopedSetting` table (migration 0012).
+
 - Daily budgets per touchpoint: `touchpoint(..., daily_budget=)` or `DAILY_BUDGETS["touchpoints"]`. Checked before every call against a running total kept in memory and re-read from recorded calls every 30 s. Calls over the limit raise `BudgetExceeded`, and agents stop with `stopped="budget"`.
 
 - Many tools: agents with more than `DEFER_TOOLS_ABOVE` tools load them on demand. The prompt gets a category overview instead of every schema. `find_tools` ranks by words, with rarer words counting more, takes a `category`, and can search by meaning through `TOOL_SEARCH_TOUCHPOINT`. Only the `MAX_LOADED_TOOLS` most recently found tools stay bound.

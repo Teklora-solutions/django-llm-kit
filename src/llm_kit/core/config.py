@@ -62,6 +62,9 @@ DEFAULTS: dict[str, Any] = {
     "MONITORING_PERMISSION": None,
     # Bearer token accepted by /llm/metrics/ (Prometheus); staff sessions always work.
     "METRICS_TOKEN": None,
+    # Scoped settings (llm_kit.scoped): who may change each scope's values,
+    # {"platform"|"tenant"|"user": "dotted.path:fn(user, tenant) -> bool"}.
+    "SCOPE_PERMISSIONS": {},
     # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
     "TENANT_RESOLVER": None,
     # Agents: how deep subagents may nest (0 = no delegation), how many hand-offs one request

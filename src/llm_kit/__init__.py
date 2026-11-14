@@ -12,8 +12,10 @@ __all__ = [
     "AllModelsFailed",
     "ClientChoice",
     "DjangoSaver",
+    "Param",
     "RetryPolicy",
     "ServerChoice",
+    "Settable",
     "agent",
     "get_graph",
     "get_touchpoint",
@@ -29,6 +31,10 @@ def __getattr__(name):
         from llm_kit.core import touchpoints
 
         return getattr(touchpoints, name)
+    if name in ("Settable", "Param"):
+        from llm_kit.core import scoped
+
+        return getattr(scoped, name)
     if name == "AllModelsFailed":
         from llm_kit.core.errors import AllModelsFailed
 
