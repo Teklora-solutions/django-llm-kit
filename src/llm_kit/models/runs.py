@@ -7,20 +7,23 @@ import uuid
 from django.conf import settings
 from django.db import models
 
-ACTIVE = ("queued", "running")
+WAITING = "waiting"  # queued behind the thread's current run (start(..., queue=True))
+ACTIVE = ("queued", "running")  # at most one per thread
 FINISHED = ("interrupted", "done", "error", "cancelled", "lost")
-STATUS = [(s, s) for s in (*ACTIVE, *FINISHED)]
+STATUS = [(s, s) for s in (WAITING, *ACTIVE, *FINISHED)]
 
 
 class BackgroundRun(models.Model):
     """One run of a thread's graph that keeps going without the request that started it.
 
-    Its ``id`` is also the recorded ``LLMRun.run_id``. At most one is queued or running per thread."""
+    Its ``id`` is also the recorded ``LLMRun.run_id``. At most one is queued or running per thread;
+    others may be ``waiting`` behind it, and start in order."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     thread = models.ForeignKey("llm_kit.Thread", on_delete=models.CASCADE, related_name="background_runs")
     graph = models.CharField(max_length=100)
     status = models.CharField(max_length=12, choices=STATUS, default="queued", db_index=True)
+    # waiting: submitted to the executor once the thread is free; queued/running: submitted.
     payload = models.JSONField(default=dict, blank=True, help_text="The run payload (message, input, resume...).")
     # Who the run acts for, as when it was started.
     user = models.ForeignKey(
@@ -58,7 +61,8 @@ class BackgroundRun(models.Model):
 
     @property
     def active(self) -> bool:
-        return self.status in ACTIVE
+        """Not finished yet: waiting, queued or running."""
+        return self.status == WAITING or self.status in ACTIVE
 
     def cancel(self) -> bool:
         """Ask the run to stop (it stops within a couple of seconds wherever it runs)."""

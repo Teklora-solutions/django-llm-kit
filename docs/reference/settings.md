@@ -26,6 +26,7 @@ LLM_KIT = {
 | `EXPOSE_ERRORS` | `DEBUG` | include exception details in `error` events |
 | `RUN_EXECUTOR` | `"thread"` | where [background runs](../guides/streaming.md#background-runs) execute: `"thread"`, `"celery"`, `"django_q"` or `"pkg.module:fn"` |
 | `RUN_EVENTS` | `"auto"` | how background runs' events reach watchers: `"channels"` (the channel layer), `"local"` (this process), `"auto"` (channels when `CHANNEL_LAYERS` is set) |
+| `RUN_QUEUE` | `False` | background runs on a busy thread [wait their turn](../guides/streaming.md#queued-follow-ups) instead of being refused; per call `"queue"` |
 | `RUN_LOST_AFTER` | `60` | seconds without a heartbeat before a running background run is marked `lost` |
 
 ## Access

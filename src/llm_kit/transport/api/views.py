@@ -25,7 +25,8 @@ class ThreadViewSet(viewsets.ModelViewSet):
     GET  threads/<id>/state/     current state (values, next, interrupts)
     GET  threads/<id>/history/   checkpoints, newest first (?limit=20)
     POST threads/<id>/runs/      run to completion / next interrupt, return state;
-                                 with "background": true, start it detached (202, the run)
+                                 with "background": true, start it detached (202, the run);
+                                 "queue": true waits its turn on a busy thread
     """
 
     serializer_class = ThreadSerializer
@@ -72,11 +73,12 @@ class ThreadViewSet(viewsets.ModelViewSet):
         body.is_valid(raise_exception=True)
         payload = dict(body.validated_data)
         owner = access.owner_from_request(request)
-        if payload.pop("background", False):
+        queue = payload.pop("queue", None)
+        if payload.pop("background", False) or queue:
             from llm_kit import background
 
             try:
-                run = background.start(thread, payload, owner)
+                run = background.start(thread, payload, owner, queue=queue)
             except runs.BadRequest as e:
                 raise ValidationError({"detail": str(e)}) from e
             except BudgetExceeded as e:
@@ -96,6 +98,7 @@ class ThreadViewSet(viewsets.ModelViewSet):
             return Response({"detail": str(e)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         state = runs.invoke_run(get_graph(thread.graph), graph_input, config)
         thread.save(update_fields=["updated_at"])
+        _advance(thread)
         return Response(state, status=status.HTTP_200_OK)
 
 
@@ -103,6 +106,12 @@ def _active_run(thread):
     from llm_kit.background.service import active_run
 
     return active_run(thread)
+
+
+def _advance(thread):
+    from llm_kit.background.service import advance
+
+    advance(thread)
 
 
 def _busy(e):
