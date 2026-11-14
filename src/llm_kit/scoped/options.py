@@ -12,8 +12,13 @@ def choice_for(tp):
     return ClientChoice(allow=tp.settable.model_allow if tp.settable is not None else ("*",))
 
 
-def model_options(tp, limit: int = 200) -> list[dict]:
+def model_options(tp, owner=None, limit: int = 200) -> list[dict]:
+    from llm_kit.touchpoints.env import DjangoEnv
     from llm_kit.touchpoints.picker import allowed_models
+
+    env = DjangoEnv()
+    if owner is not None:  # keys the asker's tenant or user brought count
+        env = env.for_caller(owner).for_touchpoint(tp)
 
     return [
         {
@@ -23,5 +28,5 @@ def model_options(tp, limit: int = 200) -> list[dict]:
             "price_output": None if row.price_output is None else str(row.price_output),
             "context_window": row.context_window,
         }
-        for row in allowed_models(tp, choice=choice_for(tp), limit=limit)
+        for row in allowed_models(tp, choice=choice_for(tp), limit=limit, env=env)
     ]

@@ -199,6 +199,7 @@ class _Call:
     retry: RetryPolicy
     resolution: Any
     params: dict[str, Any]
+    owners: list[str] = None  # whose keys each attempt uses
 
 
 def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) -> tuple[_Call, list[Any]]:
@@ -214,11 +215,20 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
     backend = tp.backend if tp.backend in ("litellm", "langchain", "auto") else None
     factory = get_embedder_factory(backend)
     merged = {**resolution.params, **params}
-    embedders = [
-        as_embedder(factory(ref, dict(merged), env.api_keys(provider_of(ref)))) for ref in resolution.candidates
-    ]
+    from llm_kit.core.touchpoints.backends import key_sets
+
+    refs, owners, embedders = [], [], []
+    for ref in resolution.candidates:
+        for owner, keys in key_sets(env, ref, tp):  # BYOK: the caller's keys, then the platform's
+            refs.append(ref)
+            owners.append(owner)
+            embedders.append(as_embedder(factory(ref, dict(merged), keys)))
+    if not embedders:
+        from llm_kit.core.touchpoints.backends import no_key
+
+        raise no_key(tp, resolution.candidates)
     run = config_ if config_ is not None else _running()
-    call = _Call(tp, list(resolution.candidates), embedders, policy_for(tp, run, retry), resolution, merged)
+    call = _Call(tp, refs, embedders, policy_for(tp, run, retry), resolution, merged, owners)
     return call, _inputs(inputs)
 
 
@@ -235,7 +245,7 @@ def run_sync(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
         attempt = 0
         while True:
-            rec, t0 = _start(call, ref, index, inputs)
+            rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
             try:
                 result = embedder.embed(inputs, **extra)
             except Exception as e:
@@ -259,7 +269,7 @@ async def run_async(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> li
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
         attempt = 0
         while True:
-            rec, t0 = _start(call, ref, index, inputs)
+            rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
             try:
                 result = await embedder.aembed(inputs, **extra)
             except Exception as e:
@@ -287,7 +297,7 @@ def _failure(call: _Call, errors: list[tuple[str, BaseException]]) -> BaseExcept
 # ------------------------------------------------------------------ recording
 
 
-def _start(call: _Call, ref: str, index: int, inputs: list[Any]):
+def _start(call: _Call, ref: str, index: int, inputs: list[Any], owner: str = "platform"):
     from llm_kit.core.observability.handler import get_handler
 
     if get_handler() is None:
@@ -304,6 +314,7 @@ def _start(call: _Call, ref: str, index: int, inputs: list[Any]):
         run_id=_root_run(parent),
         started_at=datetime.now(UTC),
         kind="embedding",
+        key_owner=owner,
         touchpoint=call.tp.name,
         graph=str(meta.get("llm_kit_graph", "")),
         agent=str(meta.get("llm_kit_agent") or ""),

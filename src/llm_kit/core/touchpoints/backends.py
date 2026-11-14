@@ -37,7 +37,7 @@ from langchain_core.runnables.config import (
 from langchain_core.runnables.utils import coro_with_context
 
 from llm_kit.core import config
-from llm_kit.core.errors import AllModelsFailed, ConfigError
+from llm_kit.core.errors import AllModelsFailed, ConfigError, NoKey
 from llm_kit.core.graphs import import_target
 from llm_kit.core.touchpoints.env import KEYLESS_PROVIDERS, ResolutionEnv, provider_of
 from llm_kit.core.touchpoints.resolve import Resolution
@@ -379,21 +379,49 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
     from llm_kit.core.observability.handler import get_handler
 
     handler = get_handler()
-    models = []
+    models, refs = [], []
     for index, ref in enumerate(resolution.candidates):
-        model = factory(ref, dict(resolution.params), env.api_keys(provider_of(ref)))
-        model.metadata = {**(model.metadata or {}), **metadata, "llm_kit_candidate": index, "llm_kit_model": ref}
-        model.tags = [*(model.tags or []), f"llm_kit:{tp.name}"]
-        if handler is not None:
-            existing = model.callbacks if isinstance(model.callbacks, list) else []
-            model.callbacks = [*existing, handler]
-        models.append(model)
+        for owner, keys in key_sets(env, ref, tp):  # one attempt per owner (BYOK: theirs, then yours)
+            model = factory(ref, dict(resolution.params), keys)
+            model.metadata = {
+                **(model.metadata or {}),
+                **metadata,
+                "llm_kit_candidate": index,
+                "llm_kit_model": ref,
+                "llm_kit_key_owner": owner,
+            }
+            model.tags = [*(model.tags or []), f"llm_kit:{tp.name}"]
+            if handler is not None:
+                existing = model.callbacks if isinstance(model.callbacks, list) else []
+                model.callbacks = [*existing, handler]
+            models.append(model)
+            refs.append(ref)
+    if not models:
+        raise no_key(tp, resolution.candidates)
     if len(models) == 1 and not (retry and retry.waits):
         return models[0]
     return TouchpointChatModel(
         runnable=models[0],
         fallbacks=models[1:],
         retry=retry or RetryPolicy.NEVER,
-        refs=list(resolution.candidates),
+        refs=refs,
         touchpoint=tp.name,
+    )
+
+
+def key_sets(env: ResolutionEnv, ref: str, tp=None) -> list[tuple[str, list[str]]]:
+    """``[(owner, keys), ...]`` to try for ``ref``, in order: an env with ``key_sets`` (bring your
+    own key) may give the caller's keys before, or instead of, the platform's."""
+    provider = provider_of(ref)
+    sets = getattr(env, "key_sets", None)
+    if sets is not None:
+        return sets(provider, tp)  # may be empty: the caller must bring a key and has none
+    return [("platform", env.api_keys(provider))]
+
+
+def no_key(tp, refs: list[str]) -> ConfigError:
+    providers = sorted({provider_of(r) for r in refs})
+    return NoKey(
+        f"No API key for {', '.join(providers)}: {getattr(tp, 'name', 'this touchpoint')} uses only "
+        "keys its tenant or user brought, and they have none for it."
     )

@@ -172,6 +172,7 @@ class ObservabilityHandler(BaseCallbackHandler):
             model=str(model),
             provider=normalise_provider(str(model).split("/", 1)[0]) if "/" in str(model) else "",
             chosen_by=str(meta.get("llm_kit_chosen_by") or ""),
+            key_owner=str(meta.get("llm_kit_key_owner") or ""),
             fallback_index=int(meta.get("llm_kit_candidate") or 0),
             prompt_hash=_hash(payload),
             tools_hash=_hash(invocation.get("tools")) if invocation.get("tools") else "",

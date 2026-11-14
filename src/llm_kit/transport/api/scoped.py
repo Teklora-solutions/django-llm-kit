@@ -130,3 +130,59 @@ class SettingsView(APIView):
 
     def delete(self, request):
         return self._change(request, saving=False)
+
+
+class KeysView(APIView):
+    """``GET llm/api/keys/?scope=tenant`` lists the scope's own provider keys (fingerprints only);
+    ``POST {"scope", "provider", "key", "label"?}`` adds one. Needs ``BYOK_SCOPES``."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from llm_kit.scoped import keys
+
+        scope = request.query_params.get("scope", "user")
+        owner = SettingsView._owner(self, request)
+        try:
+            listed = keys.list_keys(owner, scope)
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=403)
+        return Response(
+            {
+                "scope": scope,
+                "editable": service.can_edit(owner, scope),
+                "providers": keys.suggested_providers(),
+                "keys": listed,
+            }
+        )
+
+    def post(self, request):
+        from llm_kit.scoped import keys
+
+        data = request.data if isinstance(request.data, dict) else {}
+        owner = SettingsView._owner(self, request)
+        try:
+            row = keys.add_key(
+                owner, str(data.get("scope") or ""), data.get("provider", ""), data.get("key"), data.get("label", "")
+            )
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+        return Response(row, status=201)
+
+
+class KeyDetailView(APIView):
+    """``DELETE llm/api/keys/<id>/?scope=tenant`` removes one of the scope's keys."""
+
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk: int):
+        from llm_kit.scoped import keys
+
+        owner = SettingsView._owner(self, request)
+        try:
+            removed = keys.remove_key(owner, request.query_params.get("scope", "user"), pk)
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=403)
+        return Response(status=204 if removed else 404)

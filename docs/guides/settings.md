@@ -58,6 +58,44 @@ tone = scoped.value("support.tone", caller)   # the user's, else the tenant's, e
 
 `choices` can be a function `fn(owner) -> [...]` when the options depend on who is asking. Register settings in your app's `ready()` or in the module that declares your touchpoints.
 
+## Bring your own key
+
+Tenants and users can store their own provider keys, so their calls bill their provider account rather than yours. Turn it on for the scopes you want:
+
+```python
+LLM_KIT = {
+    "BYOK_SCOPES": ("tenant",),            # who may store keys ("tenant", "user")
+    "KEY_POLICY": "own_then_platform",     # the default for every touchpoint
+}
+```
+
+Each touchpoint uses one **key policy**: `Settable(keys=...)`, otherwise `KEY_POLICY`:
+
+| `KeyPolicy` | Whose keys a call uses |
+|---|---|
+| `PLATFORM_ONLY` (default) | yours only |
+| `OWN_ONLY` | only the keys the caller's user or tenant stored. Fallbacks to providers they have no key for are skipped. With no key at all the call raises `NoKey` before contacting anyone, and your keys are never used for them |
+| `OWN_THEN_PLATFORM` | the user's keys, then the tenant's, then yours. Each one is a separate attempt, so yours are used when they have no key for that provider, or when theirs fails |
+| `TENANT_CHOOSES` | the tenant picks `own_only` or `own_then_platform` with the `keys.policy` setting (default `own_then_platform`) |
+
+```python
+from llm_kit import KeyPolicy, Settable, touchpoint
+
+touchpoint("support.chat", default="anthropic/claude-sonnet-5-5", settable=Settable(keys=KeyPolicy.OWN_ONLY))
+```
+
+Every call records whose key it used (`LLMCall.key_owner`: `platform`, `tenant` or `user`), for billing and for the monitoring filters. Calls without a caller, and callers whose tenant brought nothing, use your keys unless the policy is `OWN_ONLY`. Local models (Ollama and other keyless providers) need no key under any policy.
+
+Stored keys are encrypted (`ENCRYPTION_KEYS`), like your own `ProviderKey` rows, and are never returned: the API shows a fingerprint (`…3456 1a2b3c4d`).
+
+```
+GET    llm/api/keys/?scope=tenant     {"scope", "editable", "providers": ["anthropic", "openai"], "keys": [{"id", "provider", "label", "fingerprint", "active", "created_at"}]}
+POST   llm/api/keys/                  {"scope": "tenant", "provider": "anthropic", "key": "sk-...", "label": "production"}
+DELETE llm/api/keys/<id>/?scope=tenant
+```
+
+`providers` lists the providers your touchpoints call, to fill a dropdown. Anyone in the scope can list its keys. Adding and removing keys follows `SCOPE_PERMISSIONS`, as for settings. The model options in `llm/api/settings/` count the keys the asker brought.
+
 ## Who may change what
 
 `LLM_KIT["SCOPE_PERMISSIONS"]` maps a scope to `fn(user, tenant) -> bool`:

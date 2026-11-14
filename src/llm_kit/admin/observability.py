@@ -34,6 +34,7 @@ class LLMCallAdmin(_ReadOnly):
     )
     list_filter = (
         "kind",
+        "key_owner",
         "status",
         "error_class",
         "chosen_by",

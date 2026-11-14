@@ -60,3 +60,8 @@ class BudgetExceeded(LLMKitError):
     def __init__(self, scope: str, spent, budget) -> None:
         self.scope, self.spent, self.budget = scope, spent, budget
         super().__init__(f"Today's {scope} budget of ${budget} is used up (${spent} spent).")
+
+
+class NoKey(ConfigError):
+    """No provider key a call may use: under a bring-your-own-key policy, the caller's tenant
+    or user has none for the provider (your keys are not used for them)."""

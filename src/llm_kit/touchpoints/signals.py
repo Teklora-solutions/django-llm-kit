@@ -13,8 +13,9 @@ def _connect():
     def overrides_changed(**kwargs):
         invalidate_overrides()
 
-    def keys_changed(**kwargs):
-        invalidate_keys()
+    def keys_changed(instance=None, **kwargs):
+        scope = getattr(instance, "scope", "")
+        invalidate_keys(scope, getattr(instance, "scope_id", "")) if scope else invalidate_keys()
 
     for signal in (post_save, post_delete):
         signal.connect(overrides_changed, sender=TouchpointOverride, weak=False, dispatch_uid=f"llm_kit_tpo_{signal}")

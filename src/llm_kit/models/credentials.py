@@ -6,7 +6,16 @@ from django.db import models
 
 
 class ProviderKey(models.Model):
+    """A provider key: the platform's (``scope`` blank), or one a tenant or user brought (BYOK)."""
+
     provider = models.CharField(max_length=100, help_text="LiteLLM provider name, e.g. anthropic, gemini, openrouter")
+    scope = models.CharField(
+        max_length=10,
+        blank=True,
+        choices=[("", "Platform"), ("tenant", "Tenant"), ("user", "User")],
+        help_text="Blank: yours, used for everyone. Tenant/user: brought by them (bring your own key).",
+    )
+    scope_id = models.CharField(max_length=255, blank=True, help_text="The tenant's or user's id.")
     label = models.CharField(max_length=100, blank=True)
     key_encrypted = models.TextField(editable=False)
     fingerprint = models.CharField(max_length=40, editable=False, help_text="Last 4 characters and a hash prefix")
