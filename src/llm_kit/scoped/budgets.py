@@ -161,6 +161,8 @@ def list_for(who, scope: str, member: Any = None) -> list[dict[str, Any]]:
     if scope_id is None:
         raise NotPermitted(f"You have no {scope}.")
     if scope == "member" and member not in (None, ""):
+        if str(member) != str(scope_ids(who)["user"]) and not can_set(who, scope):
+            raise NotPermitted("You can't see other members' budgets.")
         _check_member(who, scope_id, member)
         key_id = f"{scope_id}:{member}"
         out = []

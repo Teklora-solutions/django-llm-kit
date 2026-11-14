@@ -152,7 +152,12 @@ digest = touchpoint("crm.digest", default="anthropic/claude-haiku-5-5", daily_bu
 LLM_KIT = {"DAILY_BUDGETS": {"touchpoints": {"crm.digest": 10}}}   # sets or overrides it without a deploy
 ```
 
-Once the touchpoint has reached its limit, `model()`, `complete()` and `embed()` raise `BudgetExceeded`, and an agent using it stops with `stopped="budget"`. The check runs before every call without querying the database each time. Each process keeps a running total: it reads today's recorded spend, adds its own calls as they are priced, and reads the database again every 30 seconds, which picks up other processes' calls. Under heavy parallel use, a touchpoint can go over its limit by what other processes spent since the last read.
+Once the touchpoint has reached its limit, `model()`, `complete()` and `embed()` raise `BudgetExceeded`, and an agent using it stops with `stopped="budget"`. The check runs before every call without querying the database each time. Each process reads the period's recorded spend, at most every 30 seconds, and adds what has been spent since:
+
+- With a shared cache (Redis or Memcached as Django's default cache), every process adds each priced call to counters in the cache, so all workers see each other's spend at once. This is `SPEND_COUNTER = "auto"`, the default. Use `"cache"` to force it, or `None` to turn it off.
+- With a per-process cache (Django's default `LocMemCache`), each process adds only its own calls, and sees other processes' spend at the next read.
+
+Either way a limit can be passed by about one call: a call already under way finishes.
 
 A request from a user or tenant that has reached its limit is refused before it starts. `agents.run` raises `BudgetExceeded`, the HTTP views answer 429, and the WebSocket consumer sends an `error` event. Calls are written in the background, so the day's total can miss the last few seconds of spend. `DAILY_BUDGETS` needs the `database` sink.
 

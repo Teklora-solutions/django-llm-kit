@@ -171,3 +171,14 @@ def test_the_template_tags_take_a_scope_id_for_admin_pages(tp, world, root):  # 
     request.user = world["alice"]
     html = Template(source).render(Context({"request": request, "tid": world["globex"].pk}))
     assert "no tenant settings" in html
+
+
+def test_members_cant_see_each_others_budgets(world):
+    alice, carol = caller_for(world["alice"]), caller_for(world["carol"])
+    budgets.set_budget(alice, "member", "day", 5, member=world["alice"].pk)
+    with pytest.raises(service.NotPermitted, match="other members"):
+        budgets.list_for(carol, "member", world["alice"].pk)  # carol isn't a manager
+    r = client(world["carol"]).get("/llm/api/budgets/", {"scope": "member", "member": world["alice"].pk})
+    assert r.status_code == 404 and "5" not in str(r.content)
+    assert budgets.list_for(carol, "member", world["carol"].pk) == []  # her own: allowed
+    assert len(budgets.list_for(alice, "member", world["alice"].pk)) == 1
