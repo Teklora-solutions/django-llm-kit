@@ -106,6 +106,11 @@ DEFAULTS: dict[str, Any] = {
     # Run hooks: fn(run) called before every run, in the process that runs it (see llm_kit.core.hooks).
     # Per graph: GRAPHS[name] = {"graph": ..., "prepare": "pkg.mod:fn"}.
     "RUN_HOOKS": [],
+    # Per-model rate limits of your provider accounts: {"gemini/*": {"rpm": 10, "tpm": 250000, "rpd": 500}}
+    # (RateLimit rows win for the same pattern). Counted in Django's cache: "auto" (Redis with a
+    # sliding window when the default cache is Redis, else the cache), "redis", "cache" or "off".
+    "RATE_LIMITS": {},
+    "RATE_LIMIT_BACKEND": "auto",
     "RUN_EXECUTOR": "thread",
     # A background run started on a busy thread waits its turn instead of being refused (409);
     # per call: "queue": true/false, start(..., queue=).

@@ -28,6 +28,7 @@ is the common name for the output size (OpenAI's ``dimensions``, Gemini's
 
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
@@ -42,6 +43,8 @@ from llm_kit.core.errors import AllModelsFailed, ConfigError
 from llm_kit.core.graphs import import_target
 from llm_kit.core.touchpoints.env import KEYLESS_PROVIDERS, provider_of
 from llm_kit.core.touchpoints.retry import RetryPolicy
+
+logger = logging.getLogger("llm_kit.touchpoints")
 
 
 @dataclass
@@ -216,6 +219,7 @@ class _Call:
     params: dict[str, Any]
     owners: list[str] = None  # whose keys each attempt uses
     run: dict | None = None  # the call's config (or the running agent's), for who it is for
+    limiter: Any = None  # ratelimit.Limiter, for attempts on the platform's keys
 
 
 def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) -> tuple[_Call, list[Any]]:
@@ -247,6 +251,8 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
         raise no_key(tp, resolution.candidates)
     run = config_ if config_ is not None else _running()
     call = _Call(tp, refs, embedders, policy_for(tp, run, retry), resolution, merged, owners, run)
+    limiter_for = getattr(env, "rate_limiter", None)
+    call.limiter = limiter_for() if callable(limiter_for) else None
     return call, _inputs(inputs)
 
 
@@ -263,6 +269,9 @@ def run_sync(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
         attempt = 0
         while True:
+            if (refused := _slot(call, index, ref)) is not None:
+                errors.append((ref, refused))
+                break
             rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
             try:
                 result = embedder.embed(inputs, **extra)
@@ -276,6 +285,7 @@ def run_sync(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list
                 backends._sleep(delay)
                 continue
             _end(rec, t0, inputs, result=result)
+            _count(call, index, ref, result)
             return result.vectors
     raise _failure(call, errors)
 
@@ -287,6 +297,9 @@ async def run_async(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> li
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
         attempt = 0
         while True:
+            if (refused := await _aslot(call, index, ref)) is not None:
+                errors.append((ref, refused))
+                break
             rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
             try:
                 result = await embedder.aembed(inputs, **extra)
@@ -300,8 +313,46 @@ async def run_async(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> li
                 await backends._asleep(delay)
                 continue
             _end(rec, t0, inputs, result=result)
+            _count(call, index, ref, result)
             return result.vectors
     raise _failure(call, errors)
+
+
+def _limited(call: _Call, index: int) -> bool:
+    owner = call.owners[index] if call.owners else "platform"
+    return call.limiter is not None and owner in ("", "platform")
+
+
+def _slot(call: _Call, index: int, ref: str) -> BaseException | None:
+    if not _limited(call, index):
+        return None
+    from llm_kit.core.touchpoints.ratelimit import RateLimited
+
+    try:
+        call.limiter.acquire(ref, call.retry.max_wait if call.retry.waits else 0.0)
+    except RateLimited as e:
+        return e
+    return None
+
+
+async def _aslot(call: _Call, index: int, ref: str) -> BaseException | None:
+    if not _limited(call, index):
+        return None
+    from llm_kit.core.touchpoints.ratelimit import RateLimited
+
+    try:
+        await call.limiter.aacquire(ref, call.retry.max_wait if call.retry.waits else 0.0)
+    except RateLimited as e:
+        return e
+    return None
+
+
+def _count(call: _Call, index: int, ref: str, result: Embedded) -> None:
+    if _limited(call, index) and result.input_tokens:
+        try:
+            call.limiter.record(ref, result.input_tokens)
+        except Exception:
+            logger.warning("Could not count tokens for %s", ref, exc_info=True)
 
 
 def _failure(call: _Call, errors: list[tuple[str, BaseException]]) -> BaseException:

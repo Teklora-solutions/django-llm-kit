@@ -25,6 +25,8 @@ LLM_KIT = {
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes for SSE/WebSocket runs (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |
 | `EXPOSE_ERRORS` | `DEBUG` | include exception details in `error` events |
+| `RATE_LIMITS` | `{}` | your accounts' [per-model limits](../guides/touchpoints.md#your-accounts-rate-limits): `{"provider/model" or pattern: {"rpm", "tpm", "rpd"}}` (`RateLimit` rows win) |
+| `RATE_LIMIT_BACKEND` | `"auto"` | where the counts live: `"auto"` (Redis when the default cache is Redis, else the cache), `"redis"`, `"cache"`, `"off"` |
 | `RUN_EXECUTOR` | `"thread"` | where [background runs](../guides/streaming.md#background-runs) execute: `"thread"`, `"celery"`, `"django_q"` or `"pkg.module:fn"` |
 | `RUN_EVENTS` | `"auto"` | how background runs' events reach watchers: `"channels"` (the channel layer), `"local"` (this process), `"auto"` (channels when `CHANNEL_LAYERS` is set) |
 | `RUN_QUEUE` | `False` | background runs on a busy thread [wait their turn](../guides/streaming.md#queued-follow-ups) instead of being refused; per call `"queue"` |

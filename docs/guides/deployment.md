@@ -14,7 +14,7 @@ With [background runs](streaming.md#background-runs) on the default thread execu
 
 ## Use a shared cache
 
-The [circuit breaker](monitoring.md#circuit-breaker) and the versioned caches for touchpoint overrides, agent overrides and stored keys live in Django's cache. With several processes, use Redis or Memcached so they agree; the local-memory cache gives each process its own view.
+The [circuit breaker](monitoring.md#circuit-breaker), [rate limit](touchpoints.md#your-accounts-rate-limits) counts and the versioned caches for touchpoint overrides, agent overrides and stored keys live in Django's cache. With several processes, use Redis or Memcached so they agree; the local-memory cache gives each process its own view.
 
 ## Schedule the jobs
 

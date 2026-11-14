@@ -1,4 +1,4 @@
-"""Drop cached overrides (touchpoints, agents) and keys in every process when an admin edits them."""
+"""Drop cached overrides (touchpoints, agents), rate limits and keys in every process when an admin edits them."""
 
 
 def _connect():
@@ -6,7 +6,8 @@ def _connect():
 
     from llm_kit.agents.overrides import invalidate as invalidate_agent_overrides
     from llm_kit.credentials.keys import invalidate as invalidate_keys
-    from llm_kit.models import AgentOverride, ProviderKey, ScopedBudget, ScopedSetting, TouchpointOverride
+    from llm_kit.models import AgentOverride, ProviderKey, RateLimit, ScopedBudget, ScopedSetting, TouchpointOverride
+    from llm_kit.ratelimits import invalidate as invalidate_rate_limits
     from llm_kit.scoped.budgets import invalidate as invalidate_budgets
     from llm_kit.scoped.service import invalidate as invalidate_scoped
     from llm_kit.touchpoints.env import invalidate_overrides
@@ -32,6 +33,9 @@ def _connect():
             sender=ScopedBudget,
             weak=False,
             dispatch_uid=f"llm_kit_sb_{signal}",
+        )
+        signal.connect(
+            lambda **kw: invalidate_rate_limits(), sender=RateLimit, weak=False, dispatch_uid=f"llm_kit_rl_{signal}"
         )
         signal.connect(
             lambda **kw: invalidate_agent_overrides(),

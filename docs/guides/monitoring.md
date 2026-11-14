@@ -32,7 +32,7 @@ It never returns a secret, only counts and sources. Having a key doesn't prove t
 
 ## JSON API
 
-The same data over HTTP: `GET /llm/api/monitoring/{summary,timeseries,breakdown,errors,top,providers,alerts}/?period=7d&touchpoint=…`, and `GET /llm/api/monitoring/readiness/` (no parameters).
+The same data over HTTP: `GET /llm/api/monitoring/{summary,timeseries,breakdown,errors,top,providers,alerts}/?period=7d&touchpoint=…`, `GET /llm/api/monitoring/readiness/` and `GET /llm/api/monitoring/rate-limits/` (no parameters).
 
 Staff only, unless `MONITORING_PERMISSION` names a DRF permission class.
 

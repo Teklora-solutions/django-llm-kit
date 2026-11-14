@@ -64,6 +64,35 @@ When **every** model fails, the call raises `llm_kit.AllModelsFailed`. Its messa
 
 Provider SDKs retry on their own too (Anthropic's and OpenAI's clients retry twice by default). llm-kit's wait comes after theirs, so lower the SDK's `max_retries` in `params` if you want llm-kit to decide.
 
+### Your account's rate limits
+
+Waiting out a 429 only helps after the provider refused you. When you know your account's limits, llm-kit can keep within them. It counts requests and tokens per minute and requests per day for each model, shared by every process, and doesn't send a call that would go over.
+
+```python
+LLM_KIT = {
+    "RATE_LIMITS": {
+        "gemini/gemini-3.8-flash": {"rpm": 10, "tpm": 250_000, "rpd": 500},
+        "anthropic/*": {"rpm": 50, "tpm": 40_000},     # each matching model gets these
+    },
+}
+```
+
+Or set them in the admin (*LLM Kit → Rate limits*). A row wins over the setting for the same pattern, and a model's own limits win over a pattern's. These describe your account's tier with each provider, so they are set by people and never synced from the catalogue. `0` means no limit of that kind.
+
+- **Before each call** a slot is taken. When the model is at a limit, the call waits for a slot up to its retry policy's `max_wait` (6 s by default; never with `RetryPolicy.NEVER`). It doesn't wait if no slot frees up in time. Then it moves to the next fallback.
+- **When no model has a slot**, the call fails with `llm_kit.core.touchpoints.ratelimit.RateLimited` (in `AllModelsFailed` when there were fallbacks). It is classified `rate_limit`, or `quota_exhausted` for the daily limit, and gives the `reason` (`rpm`, `tpm`, `rpd`) and `retry_in`.
+- **Tokens** are counted after each call, from the usage the provider reports, so a token limit applies from the next call. One call can go over it.
+- A refused request takes no slot. Once any limit is set, all three counts are kept for every model, so `GET llm/api/monitoring/rate-limits/` (or `ratelimits.usage()`) can show use against limits.
+- Calls made with keys a tenant or user [brought](settings.md#bring-your-own-key) aren't counted: those are their account's limits, not yours.
+- Embedding calls take slots too.
+
+The counts live in Django's cache (`RATE_LIMIT_BACKEND`, default `"auto"`):
+- **Redis as the default cache** (Django's `RedisCache` or django-redis): one atomic script with a sliding one-minute window, so it never goes over.
+- **Memcached or another shared cache:** fixed clock-minute windows. Up to twice the per-minute limit can go out across a minute boundary.
+- **The local-memory cache:** each process counts on its own.
+
+Set `"redis"` to require Redis, or `"off"` to stop counting.
+
 ## Who chooses the model
 
 | Policy | When a client sends `"model"` | Options |

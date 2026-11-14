@@ -10,6 +10,7 @@ from llm_kit.models.checkpoints import Checkpoint, CheckpointBlob, CheckpointWri
 from llm_kit.models.credentials import ProviderKey
 from llm_kit.models.monitoring import AlertEvent, AlertRule, MonitoringDashboard
 from llm_kit.models.observability import LLMCall, LLMRun, ToolCall
+from llm_kit.models.ratelimits import RateLimit
 from llm_kit.models.runs import BackgroundRun
 from llm_kit.models.scoped import ScopedBudget, ScopedSetting
 from llm_kit.models.threads import Thread
@@ -33,6 +34,7 @@ __all__ = [
     "LLMRun",
     "MonitoringDashboard",
     "ProviderKey",
+    "RateLimit",
     "ScopedBudget",
     "ScopedSetting",
     "Thread",

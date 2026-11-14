@@ -41,6 +41,10 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 `RunSetup` (`graph`, `input`, `config`, `payload`, `owner`, `thread`, `background`, `context`; `set_state()`, `set_configurable()`, `add_callback()`, `enter()`), `RunRefused`, `HookFailed`, `prepare(...)`, `context_of(config)`. See [Run hooks](../guides/graphs.md#run-hooks).
 
+## `llm_kit.ratelimits`
+
+`limits_for(model)`, `limiter()`, `usage()`, `configured()`, `Limits`, `RateLimited`. See [Your account's rate limits](../guides/touchpoints.md#your-accounts-rate-limits).
+
 ## `llm_kit.tools`
 
 `expose(model, **options)`, `register(tool, *, permission=…, category=…)`, `select(*, names, categories, kinds)`, `for_user(user, tenant=…)`, `for_config(config)`, `all_tools()`, `guidance(tools)`, `pending_for(user)`, `approve(proposal, by)`, `reject(proposal, by, reason="")`, `PUBLIC`, `Caller`. See [Model tools](../guides/tools.md).
@@ -67,4 +71,4 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## Models
 
-`llm_kit.models`: `Thread`, `BackgroundRun`, `LLMCall`, `LLMRun`, `ToolCall`, `ToolProposal`, `TouchpointOverride`, `AgentOverride`, `ProviderKey`, `AlertRule`, `AlertEvent`, the `Catalogue*` tables and the `Checkpoint*` tables. All are registered in the admin.
+`llm_kit.models`: `Thread`, `BackgroundRun`, `RateLimit`, `LLMCall`, `LLMRun`, `ToolCall`, `ToolProposal`, `TouchpointOverride`, `AgentOverride`, `ProviderKey`, `AlertRule`, `AlertEvent`, the `Catalogue*` tables and the `Checkpoint*` tables. All are registered in the admin.
