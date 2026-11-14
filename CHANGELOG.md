@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Background subagents: `agent(..., background_subagents=True | [names])` gives `delegate` a `background` argument. The subagent starts as a `BackgroundRun` linked to the parent (`parent_thread`, `parent_run_id`, recorded under the parent's run) with the request's remaining hand-offs, depth and budget. The parent gets a task id at once. When the task finishes, its answer is queued on the parent's thread as a message, so the parent agent tells the user. `check_task` and `cancel_task` tools follow or stop the thread's tasks (migration 0018).
+
 - `llm_kit.background.run_finished` signal (`run`, `status`, `result`, `error`): sent once per background run when it is done, interrupted, errors, is cancelled (also before it started) or is lost. It comes from whichever process notices: the worker, the canceller, or whoever marks it lost. Hook messages and push notifications to it without keeping watchers open.
 
 - Queued follow-ups: a background run started on a busy thread with `"queue": true` (`background.start(..., queue=True)`, `agents.start(..., queue=True)`, or `RUN_QUEUE`) waits as `waiting` instead of getting 409, and starts when the runs before it finish, in order. Waiting runs are listed in `llm/api/runs/` and in the watch snapshot's `queue`, and can be cancelled. Lost and cancelled runs let the queue move on. An unanswered interrupt holds it, and a `resume` never waits (migration 0017).

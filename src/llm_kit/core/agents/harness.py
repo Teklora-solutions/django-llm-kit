@@ -47,9 +47,11 @@ from llm_kit.core.agents.delegate import (
     Refused,
     arun_subagent,
     available,
+    background_names,
     delegate_tool,
     effective,
     run_subagent,
+    task_tools,
 )
 from llm_kit.core.agents.env import AgentEnv, default_env
 from llm_kit.core.agents.limits import depth_of, tree_of
@@ -126,6 +128,7 @@ class Step:
     last: bool
     llm: Any = None
     deferred: list[BaseTool] = field(default_factory=list)  # with defer_tools: not loaded yet
+    background: tuple[str, ...] = ()  # subagents it may start in the background this step
 
     @property
     def bound(self) -> list[BaseTool]:
@@ -167,7 +170,15 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         deferred = [t for t in tools if t.name not in loaded]
     subagents = available(spec, config, env)
     last = model_steps(state.get("messages") or []) + 1 >= spec.max_steps
-    step = Step(spec=spec, tools=tools, subagents=subagents, prompt="", last=last, deferred=deferred)
+    step = Step(
+        spec=spec,
+        tools=tools,
+        subagents=subagents,
+        prompt="",
+        last=last,
+        deferred=deferred,
+        background=background_names(spec, subagents, config, env),
+    )
     guidance = env.guidance(step.bound)
     if deferred:
         guidance = (guidance + "\n" if guidance else "") + (
@@ -189,7 +200,8 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         except BudgetExceeded as e:
             return {"messages": [_synthetic(f"Stopped: {e}")], "stopped": "budget"}
         offered = step.bound + ([find_tools_tool()] if deferred else [])
-        offered += [delegate_tool(spec, subagents, env)] if subagents else []
+        offered += [delegate_tool(spec, subagents, env, background=step.background)] if subagents else []
+        offered += task_tools(env) if step.background else []
         step.llm = llm.bind_tools(offered) if offered else llm
     return step
 
@@ -215,7 +227,11 @@ def _after_reply(step: Step, reply: BaseMessage) -> dict:
 def _tool_set(step: Step, state, env) -> dict[str, BaseTool]:
     tools = {t.name: t for t in step.tools}
     if step.subagents:
-        tools[DELEGATE] = delegate_tool(step.spec, step.subagents, env, parent_messages=state.get("messages"))
+        tools[DELEGATE] = delegate_tool(
+            step.spec, step.subagents, env, parent_messages=state.get("messages"), background=step.background
+        )
+    if step.background:
+        tools.update({t.name: t for t in task_tools(env)})
     return tools
 
 

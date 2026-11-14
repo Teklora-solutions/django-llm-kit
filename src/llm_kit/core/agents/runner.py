@@ -27,6 +27,8 @@ def root_config(spec: AgentSpec, config: dict[str, Any] | None = None, thread_id
     configurable.setdefault(TREE_KEY, Tree.new())
     configurable.setdefault(STACK_KEY, (spec.name,))
     config["configurable"] = configurable
+    # The root run gets a known id, so its tools (a background subagent) can name it as parent.
+    config["run_id"] = config.get("run_id") or uuid.uuid4()
     config["metadata"] = {
         "llm_kit_graph": spec.name,
         "llm_kit_thread": configurable["thread_id"],
@@ -35,6 +37,7 @@ def root_config(spec: AgentSpec, config: dict[str, Any] | None = None, thread_id
         "llm_kit_depth": len(configurable[STACK_KEY]) - 1,
         REQUEST_KEY: configurable[TREE_KEY].id,
     }
+    config["metadata"].setdefault("llm_kit_agent_run", str(config["run_id"]))
     config.setdefault("recursion_limit", 2 * spec.max_steps + 8)
     return config
 

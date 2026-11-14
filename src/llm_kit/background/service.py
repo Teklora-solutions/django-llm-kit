@@ -23,6 +23,7 @@ from llm_kit.runtime import access, runs
 
 logger = logging.getLogger("llm_kit")
 
+RUN_KEY = "__llm_kit_background_run"  # configurable: the background run a graph is running in
 POLL = 1.0  # seconds between checks for a cancel asked for elsewhere
 HEARTBEAT = 10.0  # seconds between heartbeats (RUN_LOST_AFTER must be well above it)
 WATCH_CHECK = 5.0  # seconds a quiet watcher waits before checking the run is still going
@@ -85,6 +86,7 @@ def start(
     user=None,
     tenant: Any = None,
     queue: bool | None = None,
+    links: dict[str, Any] | None = None,
 ) -> BackgroundRun:
     """Start a run of ``thread``'s graph in the background and return it at once.
 
@@ -97,6 +99,9 @@ def start(
     with ``queue=True`` (default ``LLM_KIT["RUN_QUEUE"]``) saved as ``waiting`` and started
     when the runs before it have finished, in order. A ``resume`` never waits: it answers the
     interrupt the thread is stopped at, and a queue doesn't move past an unanswered interrupt.
+
+    ``links``: ``BackgroundRun`` fields linking a background subagent to the run that started it
+    (set by the harness; see ``llm_kit.background.subagents``).
     """
     from llm_kit import conf
 
@@ -121,6 +126,7 @@ def start(
         "session_key": "" if owner.is_authenticated else owner.visitor_id,
         "tenant": owner.tenant_id,
         "executor": executor,
+        **(links or {}),
     }
     busy = active_run(thread)
     if queue and (busy is not None or waiting_runs(thread).exists()):
@@ -259,6 +265,14 @@ async def aexecute(run_id: str) -> None:
         owner = access.Owner(user=run.user, tenant=run.tenant or None)
         config = await sync_to_async(runs.build_config)(run.thread, run.payload, owner=owner)
         config["run_id"] = run.id  # the recorded LLMRun has the same id
+        config["configurable"][RUN_KEY] = run.run_id
+        meta = config.setdefault("metadata", {})
+        if "llm_kit_agent" in meta:
+            meta["llm_kit_agent_run"] = run.run_id
+        if run.agents:
+            from llm_kit.background.subagents import inherit_limits
+
+            inherit_limits(run, config)
         graph = get_graph(run.graph)
         async for event in runs.astream_run(graph, runs.build_input(run.payload), config):
             if event["event"] == "end":

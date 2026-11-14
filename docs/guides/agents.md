@@ -119,6 +119,25 @@ Deferral keeps the prompt small. It doesn't change which tools the agent may use
 - Its answer (or its `output` as JSON) is the tool result.
 - Its messages stream to the client as `token`/`message` events with `agent` and `depth` set, so a UI can show them nested.
 
+### In the background
+
+A long task needn't hold up the conversation. With `background_subagents`, the agent may start a subagent [in the background](streaming.md#background-runs) and carry on:
+
+```python
+agent(
+    "shop.assistant",
+    ...,
+    subagents=["shop.researcher", "shop.writer"],
+    background_subagents=["shop.researcher"],   # or True: all of them
+)
+```
+
+- `delegate` gets a `background` argument. With `background: true` the tool answers at once with a task id ("I've started on that"), and the subagent runs as a `BackgroundRun` on a thread of its own, for the same caller.
+- When it finishes (done, failed, cancelled or lost), its answer is [queued](streaming.md#queued-follow-ups) on the parent's thread as a message starting `[Automatic message, not from the user]`. The parent agent picks it up in a turn of its own and tells the user. Hook [`run_finished`](streaming.md#when-a-run-finishes) to deliver that reply (for example as a chat message): the report run's `reports_on` is the task.
+- `check_task(task_id)` and `cancel_task(task_id)` let the parent follow or stop the tasks its thread started (and only those).
+- Limits carry over. Starting one uses up a hand-off. It runs one level deeper, with the request's remaining hand-offs and budget (at the time it started), and is recorded under the parent's run (`LLMRun.parent_run_id`). It gets its own `AGENT_TIMEOUT`, since the request that started it may have ended. Its cost is recorded on its own run, not added to the parent's.
+- It needs a saved conversation to report to: the option is offered only to the agent running on a `Thread` (not a throwaway `agents.run`, and not a subagent, whose thread isn't one).
+
 ## Limits per request
 
 | Setting | Default | Meaning |

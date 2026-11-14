@@ -94,7 +94,8 @@ class ObservabilityHandler(BaseCallbackHandler):
             if root != run_id and not subagent:
                 return
             name = kwargs.get("name") or (serialized or {}).get("name") or "run"
-            parent = None
+            # A subagent started in the background is its own root, recorded under the run that started it.
+            parent = str(meta["llm_kit_detached_from"]) if not subagent and meta.get("llm_kit_detached_from") else None
             if subagent:
                 parent = str(meta.get("llm_kit_parent_agent_run") or root)
                 if UUID(parent) not in self._runs:

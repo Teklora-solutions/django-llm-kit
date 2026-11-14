@@ -46,6 +46,26 @@ class DjangoAgentEnv(AgentEnv):
 
         return override_for(name)
 
+    def can_detach(self, config: Any) -> bool:
+        from llm_kit.background import subagents
+
+        return subagents.can_detach(config)
+
+    def start_detached(self, agent: str, task: str, config: Any, limits: dict[str, Any]) -> dict[str, Any]:
+        from llm_kit.background import subagents
+
+        return subagents.start(agent, task, config, limits)
+
+    def task_status(self, task_id: str, config: Any) -> dict[str, Any] | None:
+        from llm_kit.background import subagents
+
+        return subagents.status(task_id, config)
+
+    def cancel_task(self, task_id: str, config: Any) -> bool | None:
+        from llm_kit.background import subagents
+
+        return subagents.cancel(task_id, config)
+
     def graph(self, name: str, *, ephemeral: bool = False) -> Any:
         from llm_kit.runtime.graphs import get_graph
 

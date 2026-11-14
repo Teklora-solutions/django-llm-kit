@@ -31,7 +31,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 `run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
 
-`start(name, task, *, user=None, tenant=None, thread=None, model=None, queue=None) -> BackgroundRun`, `astart(...)`, `watch(run)`: run an agent [in the background](../guides/streaming.md#background-runs).
+`agent(..., background_subagents=True | [names])`: subagents it may [start in the background](../guides/agents.md#in-the-background). `start(name, task, *, user=None, tenant=None, thread=None, model=None, queue=None) -> BackgroundRun`, `astart(...)`, `watch(run)`: run an agent [in the background](../guides/streaming.md#background-runs).
 
 ## `llm_kit.background`
 

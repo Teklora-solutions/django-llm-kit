@@ -39,6 +39,16 @@ class BackgroundRun(models.Model):
     cancel_requested = models.BooleanField(default=False)
     error = models.CharField(max_length=500, blank=True)
     result = models.JSONField(null=True, blank=True, help_text="The end event's data: next, interrupts.")
+    # A subagent started in the background (delegate(..., background=true)): where its answer goes,
+    # the agent run that started it, the agents above it and the limits it inherited.
+    parent_thread = models.ForeignKey(
+        "llm_kit.Thread", null=True, blank=True, on_delete=models.SET_NULL, related_name="background_tasks"
+    )
+    parent_run_id = models.UUIDField(null=True, blank=True, db_index=True)
+    agents = models.JSONField(default=list, blank=True, help_text="Agent names from the root agent down.")
+    limits = models.JSONField(null=True, blank=True, help_text="budget (USD left), delegations, max_depth.")
+    # The run that tells the parent agent a background task's result.
+    reports_on = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="reports")
 
     class Meta:
         ordering = ["-created_at"]
@@ -82,4 +92,6 @@ class BackgroundRun(models.Model):
             "cancel_requested": self.cancel_requested,
             "error": self.error,
             "result": self.result,
+            "parent_thread": str(self.parent_thread_id) if self.parent_thread_id else None,
+            "reports_on": str(self.reports_on_id) if self.reports_on_id else None,
         }
