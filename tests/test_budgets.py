@@ -101,7 +101,7 @@ def test_a_user_over_their_daily_budget_is_refused(world, scripts, settings):
     assert agents.run("tests.assistant", "x", user=alice).text == "fine"
 
     _spent("2.5", user=str(alice.pk))
-    with pytest.raises(BudgetExceeded, match=r"user budget of \$5 is used up \(\$5.50 spent\)"):
+    with pytest.raises(BudgetExceeded, match=r"user budget of \$5 is used up \(\$5.50 spent today\)"):
         agents.run("tests.assistant", "x", user=alice)
     agents.run("tests.assistant", "x", user=world["bob"])  # others are unaffected
 
@@ -131,15 +131,13 @@ def test_unknown_daily_budget_keys_are_refused(world, settings):
 @pytest.fixture
 def tracker(monkeypatch):
     """The spend tracker, fresh, reading the database on every check."""
-    from django.utils import timezone
-
     from llm_kit.core.observability import spend
-    from llm_kit.observability.budgets import spent_today
+    from llm_kit.observability.budgets import period_start, seed
 
     monkeypatch.setattr(spend, "REFRESH", 0.0)
-    spend.spend.configure(lambda name: spent_today(touchpoint=name), today=timezone.localdate)
+    spend.spend.configure(seed, period_start)
     yield spend.spend
-    spend.spend.configure(lambda name: spent_today(touchpoint=name), today=timezone.localdate)
+    spend.spend.configure(seed, period_start)
 
 
 def test_a_touchpoint_over_its_daily_budget_refuses_calls(tracker, scripts):
@@ -171,7 +169,7 @@ def test_the_setting_sets_or_overrides_a_touchpoints_budget(tracker, settings):
 
 
 def test_calls_priced_in_this_process_count_until_the_next_read(monkeypatch):
-    from datetime import date
+    from datetime import datetime
     from decimal import Decimal
 
     from llm_kit.core.observability import spend
@@ -179,16 +177,19 @@ def test_calls_priced_in_this_process_count_until_the_next_read(monkeypatch):
 
     reads = []
     tracker = spend.SpendTracker()
-    tracker.configure(lambda name: reads.append(name) or Decimal("1"), today=lambda: date(2026, 11, 14))
-    assert tracker.spent("t.a") == Decimal("1") and reads == ["t.a"]
+    day = {"start": datetime(2026, 11, 14)}
+    tracker.configure(lambda key, start: reads.append(key.touchpoint) or Decimal("1"), lambda period: day["start"])
+    key = spend.SpendKey(touchpoint="t.a")
+    assert tracker.spent(key) == Decimal("1") and reads == ["t.a"]
     tracker.observe(CallRecord(call_id="c", run_id=None, started_at=None, touchpoint="t.a", cost=Decimal("0.25")))
     tracker.observe(CallRecord(call_id="d", run_id=None, started_at=None, touchpoint="t.a", status="error"))
-    assert tracker.spent("t.a") == Decimal("1.25") and reads == ["t.a"]  # not stale yet: no read
+    tracker.observe(CallRecord(call_id="e", run_id=None, started_at=None, touchpoint="t.b", cost=Decimal("5")))
+    assert tracker.spent(key) == Decimal("1.25") and reads == ["t.a"]  # not stale yet: no read
     monkeypatch.setattr(spend, "REFRESH", 0.0)
-    assert tracker.spent("t.a") == Decimal("1")  # a fresh read includes what was written
-    tracker.today = lambda: date(2026, 11, 15)
-    tracker.seed = lambda name: Decimal(0)
-    assert tracker.spent("t.a") == Decimal(0)  # a new day starts again
+    assert tracker.spent(key) == Decimal("1")  # a fresh read includes what was written
+    day["start"] = datetime(2026, 11, 15)
+    tracker.seed = lambda key, start: Decimal(0)
+    assert tracker.spent(key) == Decimal(0)  # a new day starts again
 
 
 def test_an_agent_whose_touchpoint_is_over_budget_stops(world, scripts, tracker, temp_touchpoint_budget):
@@ -214,19 +215,36 @@ def test_reading_in_an_event_loop_happens_in_the_background():
     done = threading.Event()
     tracker = spend.SpendTracker()
 
-    def seed(name):
+    def seed(key, start):
         assert threading.current_thread() is not threading.main_thread()
         done.set()
         return Decimal("3")
 
     tracker.configure(seed)
 
+    key = spend.SpendKey(touchpoint="t.a")
+
     async def check():
-        return tracker.spent("t.a")
+        return tracker.spent(key)
 
     assert asyncio.run(check()) == 0  # the last value, while the read runs elsewhere
     assert done.wait(5)
     for _ in range(50):
-        if tracker.spent("t.a") == Decimal("3"):
+        if tracker.spent(key) == Decimal("3"):
             break
-    assert tracker.spent("t.a") == Decimal("3")
+    assert tracker.spent(key) == Decimal("3")
+
+
+def test_spend_keys_match_the_calls_they_cover():
+    from llm_kit.core.observability.records import CallRecord
+    from llm_kit.core.observability.spend import SpendKey
+
+    def call(**kw):
+        return CallRecord(call_id="c", run_id=None, started_at=None, **kw)
+
+    mine = call(user="7", tenant="3", touchpoint="t.a", key_owner="tenant")
+    assert SpendKey("tenant", "3").matches(mine) and not SpendKey("tenant", "4").matches(mine)
+    assert SpendKey("member", "3:7").matches(mine) and not SpendKey("member", "3:8").matches(mine)
+    assert SpendKey("user", "7", "t.a").matches(mine) and not SpendKey("user", "7", "t.b").matches(mine)
+    assert not SpendKey("tenant", "3", counts="platform_keys").matches(mine)  # their own key
+    assert SpendKey("tenant", "3", counts="platform_keys").matches(call(tenant="3", key_owner="platform"))

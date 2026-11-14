@@ -125,6 +125,8 @@ class Touchpoint:
 
         check_daily_budget(self)  # BudgetExceeded once today's spend reaches daily_budget
         env = self.env_for(config, env)
+        if (check_budgets := getattr(env, "check_budgets", None)) is not None:
+            check_budgets(self)  # the caller's tenant and user budgets
         resolution = self.resolve(requested, config=config, env=env)
         if not fallbacks:
             resolution.fallbacks = []

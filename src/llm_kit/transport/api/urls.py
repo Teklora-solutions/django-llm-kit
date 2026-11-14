@@ -16,6 +16,7 @@ urlpatterns = [
     path("graphs/", views.GraphListView.as_view(), name="graphs"),
     path("settings/", scoped.SettingsView.as_view(), name="settings"),
     path("keys/", scoped.KeysView.as_view(), name="keys"),
+    path("budgets/", scoped.BudgetsView.as_view(), name="budgets"),
     path("keys/<int:pk>/", scoped.KeyDetailView.as_view(), name="key"),
     path("monitoring/summary/", monitoring.SummaryView.as_view(), name="monitoring-summary"),
     path("monitoring/timeseries/", monitoring.TimeseriesView.as_view(), name="monitoring-timeseries"),

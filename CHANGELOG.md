@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Budgets per tenant, per member of a tenant, and per user, for any period (`BUDGET_PERIODS`: day, week, month or your own), optionally for one touchpoint and optionally counting only calls on platform keys. `BUDGET_EDITORS` decides who sets them. Checked before every call. `GET/PUT/DELETE llm/api/budgets/` returns spent, remaining and when the period resets. New `ScopedBudget` table (migration 0014). The spend tracker now keeps a total per scope, touchpoint and period.
+
 - Bring your own key: tenants and users store provider keys (`BYOK_SCOPES`, `GET/POST/DELETE llm/api/keys/`). Each touchpoint's `KeyPolicy` (`Settable(keys=)` or `KEY_POLICY`) decides whose keys a call uses: `platform_only`, `own_only` (raises `NoKey` without one), `own_then_platform` (theirs, then yours as the next attempt), or `tenant_chooses`. Calls record `key_owner` (migration 0013).
 
 - Scoped settings: `touchpoint(..., settable=Settable(model=..., params=...))` lets tenants and users save a model choice and parameters, kept within the touchpoint's choice. `llm_kit.scoped.register(Setting(...))` and `scoped.value()` add your own settings. `SCOPE_PERMISSIONS` decides who may change each scope. `GET/PATCH/DELETE llm/api/settings/` describes and saves them for UIs. New `ScopedSetting` table (migration 0012).

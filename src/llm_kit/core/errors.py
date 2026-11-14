@@ -57,9 +57,20 @@ class BudgetExceeded(LLMKitError):
     is refused before it starts. (A request over its own ``AGENT_BUDGET`` isn't an error: its
     agents stop with ``stopped="budget"``.)"""
 
-    def __init__(self, scope: str, spent, budget) -> None:
-        self.scope, self.spent, self.budget = scope, spent, budget
-        super().__init__(f"Today's {scope} budget of ${budget} is used up (${spent} spent).")
+    def __init__(self, scope: str, spent, budget, period: str = "day") -> None:
+        self.scope, self.spent, self.budget, self.period = scope, spent, budget, period
+        when = "today" if period == "day" else f"this {period}"
+        super().__init__(f"The {scope} budget of ${_usd(budget)} is used up (${spent} spent {when}).")
+
+
+def _usd(value) -> str:
+    """``1.0000`` -> ``1``, ``2.50`` -> ``2.5`` (``Decimal.normalize`` alone gives ``1E+1`` for 10)."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        return f"{Decimal(str(value)).normalize():f}"
+    except InvalidOperation:
+        return str(value)
 
 
 class NoKey(ConfigError):

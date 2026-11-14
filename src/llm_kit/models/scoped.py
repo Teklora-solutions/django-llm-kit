@@ -32,3 +32,35 @@ class ScopedSetting(models.Model):
     def __str__(self) -> str:
         where = f"{self.scope}:{self.scope_id}" if self.scope_id else self.scope
         return f"{where} {self.touchpoint + ' ' if self.touchpoint else ''}{self.key}"
+
+
+class ScopedBudget(models.Model):
+    """A spending limit for a tenant, a user, or each member of a tenant (``member``), per period."""
+
+    scope = models.CharField(
+        max_length=10, choices=[("tenant", "Tenant"), ("member", "Each member of a tenant"), ("user", "User")]
+    )
+    scope_id = models.CharField(max_length=255, help_text="The tenant's id (tenant, member) or the user's (user).")
+    touchpoint = models.CharField(max_length=200, blank=True, help_text="Blank: every touchpoint.")
+    period = models.CharField(max_length=20, help_text="day, week, month, or one of BUDGET_PERIODS.")
+    amount = models.DecimalField(max_digits=14, decimal_places=4, help_text="USD")
+    counts = models.CharField(
+        max_length=20,
+        default="all",
+        choices=[("all", "All calls"), ("platform_keys", "Only calls on the platform's keys")],
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope", "scope_id", "touchpoint", "period"], name="llm_kit_scoped_budget_uniq"
+            )
+        ]
+        ordering = ["scope", "scope_id", "touchpoint", "period"]
+
+    def __str__(self) -> str:
+        return f"{self.scope}:{self.scope_id} {self.touchpoint or 'all'} ${self.amount}/{self.period}"

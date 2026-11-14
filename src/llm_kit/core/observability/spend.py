@@ -1,9 +1,13 @@
-"""Today's spend per touchpoint, kept in memory so a daily budget can be checked before every call.
+"""Spend so far in a period, kept in memory so budgets can be checked before every call.
 
-The total is today's recorded spend (read from the database by the Django adapter, again
-every ``REFRESH`` seconds, which also picks up other processes' calls), plus the cost of
-this process's calls priced since that read. It is approximate: calls priced in another
-process show up at the next read, and a call can go over by about one call's cost.
+A total is identified by a ``SpendKey``: whose calls (everyone's, a tenant's, a user's, or one
+user's within a tenant), which touchpoint ("" = all), which period (``day``, ``week``,
+``month`` or one you define), and whether calls made with keys the caller brought count.
+
+Each total is the period's recorded spend (read from the database by the Django adapter, again
+every ``REFRESH`` seconds, which also picks up other processes' calls) plus the cost of this
+process's calls priced since that read. It is approximate: calls priced in another process
+show up at the next read, and a total can go over its budget by about one call's cost.
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -22,13 +26,48 @@ logger = logging.getLogger("llm_kit.observability")
 
 REFRESH = 30.0  # seconds between reads of the recorded total
 
-Seed = Callable[[str], Decimal]  # touchpoint -> USD recorded since local midnight
-Today = Callable[[], date]
+
+@dataclass(frozen=True)
+class SpendKey:
+    scope: str = ""  # "" everyone | "tenant" | "user" | "member" (one user within one tenant)
+    scope_id: str = ""  # the tenant's or user's id; for "member": "<tenant id>:<user id>"
+    touchpoint: str = ""  # "" = every touchpoint
+    period: str = "day"
+    counts: str = "all"  # "all" | "platform_keys" (calls on keys the caller brought don't count)
+
+    def matches(self, call: Any) -> bool:
+        if self.touchpoint and getattr(call, "touchpoint", "") != self.touchpoint:
+            return False
+        if self.counts == "platform_keys" and getattr(call, "key_owner", "") not in ("", "platform"):
+            return False
+        if self.scope == "tenant":
+            return str(getattr(call, "tenant", "")) == self.scope_id
+        if self.scope == "user":
+            return str(getattr(call, "user", "")) == self.scope_id
+        if self.scope == "member":
+            return f"{getattr(call, 'tenant', '')}:{getattr(call, 'user', '')}" == self.scope_id
+        return True
+
+
+Seed = Callable[[SpendKey, datetime], Decimal]  # recorded spend for key since start
+PeriodStart = Callable[[str], datetime]  # period name -> when the current one started
+
+
+def default_period_start(period: str, now: datetime | None = None) -> datetime:
+    now = now or datetime.now()
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "day":
+        return day
+    if period == "week":
+        return day - timedelta(days=day.weekday())
+    if period == "month":
+        return day.replace(day=1)
+    raise ValueError(f"Unknown budget period {period!r}: use day, week, month or BUDGET_PERIODS.")
 
 
 @dataclass
 class _Total:
-    day: date
+    start: datetime
     recorded: Decimal  # from the last read
     local: Decimal  # this process's calls priced since then
     read_at: float  # time.monotonic() of the last read; 0 = never read
@@ -38,38 +77,33 @@ class _Total:
 class SpendTracker:
     def __init__(self) -> None:
         self.seed: Seed | None = None
-        self.today: Today = date.today
-        self._totals: dict[str, _Total] = {}
+        self.period_start: PeriodStart = default_period_start
+        self._totals: dict[SpendKey, _Total] = {}
         self._lock = threading.Lock()
 
-    def configure(self, seed: Seed | None, today: Today | None = None) -> None:
+    def configure(self, seed: Seed | None, period_start: PeriodStart | None = None) -> None:
         self.seed = seed
-        self.today = today or date.today
+        self.period_start = period_start or default_period_start
         with self._lock:
             self._totals.clear()
 
-    def _total(self, touchpoint: str) -> _Total:
-        """The entry for today (a new day starts at zero). Call with the lock held."""
-        today = self.today()
-        entry = self._totals.get(touchpoint)
-        if entry is None or entry.day != today:
-            entry = self._totals[touchpoint] = _Total(today, Decimal(0), Decimal(0), 0.0)
+    def _total(self, key: SpendKey) -> _Total:
+        """The entry for the current period (a new period starts at zero). Call with the lock held."""
+        start = self.period_start(key.period)
+        entry = self._totals.get(key)
+        if entry is None or entry.start != start:
+            if entry is None and len(self._totals) > 50_000:
+                self._totals.clear()
+            entry = self._totals[key] = _Total(start, Decimal(0), Decimal(0), 0.0)
         return entry
 
-    def add(self, touchpoint: str, cost: Decimal | None) -> None:
-        """A call of ``touchpoint`` was priced at ``cost``."""
-        if not touchpoint or not cost:
-            return
-        with self._lock:
-            self._total(touchpoint).local += cost
-
-    def spent(self, touchpoint: str) -> Decimal:
-        """Today's spend for ``touchpoint``, reading the recorded total when it is stale.
+    def spent(self, key: SpendKey) -> Decimal:
+        """Spend for ``key`` this period, reading the recorded total when it is stale.
 
         In a thread with a running event loop the read happens in a background thread (a
         database query must not block the loop); until it lands, the last value is used."""
         with self._lock:
-            entry = self._total(touchpoint)
+            entry = self._total(key)
             stale = self.seed is not None and not entry.reading and time.monotonic() - entry.read_at > REFRESH
             if stale:
                 entry.reading = True
@@ -77,33 +111,40 @@ class SpendTracker:
         if not stale:
             return value
         if _in_event_loop():
-            threading.Thread(target=self._read, args=(touchpoint,), daemon=True, name="llm-kit-spend").start()
+            threading.Thread(target=self._read, args=(key,), daemon=True, name="llm-kit-spend").start()
             return value
-        self._read(touchpoint)
+        self._read(key)
         with self._lock:
-            entry = self._total(touchpoint)
+            entry = self._total(key)
             return entry.recorded + entry.local
 
-    def _read(self, touchpoint: str) -> None:
+    def _read(self, key: SpendKey) -> None:
         started = time.monotonic()
+        with self._lock:
+            start = self._total(key).start
         try:
-            recorded = self.seed(touchpoint) if self.seed is not None else Decimal(0)
+            recorded = self.seed(key, start) if self.seed is not None else Decimal(0)
         except Exception:
-            logger.warning("Could not read today's spend for %s; using this process's.", touchpoint, exc_info=True)
+            logger.warning("Could not read recorded spend for %s; using this process's.", key, exc_info=True)
             with self._lock:
-                entry = self._total(touchpoint)
+                entry = self._total(key)
                 entry.reading = False
                 entry.read_at = started  # don't retry on every call
             return
         with self._lock:
-            entry = self._total(touchpoint)
+            entry = self._total(key)
             # The read includes everything already written; this process's calls before it are in it.
             entry.recorded, entry.local, entry.read_at, entry.reading = Decimal(recorded), Decimal(0), started, False
 
     def observe(self, call: Any) -> None:
-        """Recorder observer: count each priced call towards its touchpoint."""
-        if getattr(call, "status", "") == "ok":
-            self.add(getattr(call, "touchpoint", ""), getattr(call, "cost", None))
+        """Recorder observer: count each priced call towards every total it belongs to."""
+        cost = getattr(call, "cost", None)
+        if getattr(call, "status", "") != "ok" or not cost:
+            return
+        with self._lock:
+            keys = [k for k in self._totals if k.matches(call)]
+            for key in keys:
+                self._total(key).local += cost
 
 
 def _in_event_loop() -> bool:
@@ -117,17 +158,21 @@ def _in_event_loop() -> bool:
 spend = SpendTracker()
 
 
+def check(key: SpendKey, limit: Decimal, what: str) -> None:
+    """Raise ``BudgetExceeded`` when ``key``'s spend this period has reached ``limit``."""
+    spent = spend.spent(key)
+    if spent >= limit:
+        from llm_kit.core.errors import BudgetExceeded
+
+        raise BudgetExceeded(what, spent.quantize(Decimal("0.01")), limit, key.period)
+
+
 def check_daily_budget(tp) -> None:
     """Raise ``BudgetExceeded`` when ``tp`` is over its daily budget (``daily_budget`` or
     ``DAILY_BUDGETS["touchpoints"][name]``)."""
     limit = daily_budget_of(tp)
-    if limit is None:
-        return
-    spent = spend.spent(tp.name)
-    if spent >= limit:
-        from llm_kit.core.errors import BudgetExceeded
-
-        raise BudgetExceeded(f"{tp.name!r} touchpoint", spent.quantize(Decimal("0.01")), limit)
+    if limit is not None:
+        check(SpendKey(touchpoint=tp.name), limit, f"{tp.name!r} touchpoint")
 
 
 def daily_budget_of(tp) -> Decimal | None:
