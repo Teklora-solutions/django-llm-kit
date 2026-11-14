@@ -26,22 +26,35 @@ def _scope(value) -> str | None:
     return value if value in SCOPES else None
 
 
+def _who(request, scope: str | None):
+    """The requester, or with ``scope_id`` (query or body) the tenant or user a platform admin is
+    acting on. Refusals become 403/400 responses."""
+    from rest_framework.exceptions import PermissionDenied, ValidationError
+
+    try:
+        owner = access.owner_from_request(request)
+    except access.NotAllowed as e:
+        raise PermissionDenied(str(e)) from e
+    data = request.data if isinstance(request.data, dict) else {}
+    scope_id = data.get("scope_id") or request.query_params.get("scope_id")
+    try:
+        return service.target(owner, scope or "", scope_id)
+    except service.NotPermitted as e:
+        raise PermissionDenied(str(e)) from e
+    except ValueError as e:
+        raise ValidationError({"detail": str(e)}) from e
+
+
 class SettingsView(APIView):
+    """Add ``scope_id`` (query or body) to manage another tenant's or user's values (platform admins)."""
+
     permission_classes = [IsAuthenticated]
-
-    def _owner(self, request):
-        try:
-            return access.owner_from_request(request)
-        except access.NotAllowed as e:
-            from rest_framework.exceptions import PermissionDenied
-
-            raise PermissionDenied(str(e)) from e
 
     def get(self, request):
         scope = _scope(request.query_params.get("scope", "user"))
         if scope is None:
             return Response({"detail": f"scope must be one of {', '.join(SCOPES)}."}, status=400)
-        owner = self._owner(request)
+        owner = _who(request, scope)
         if service.scope_ids(owner).get(scope) is None:
             return Response({"detail": f"You have no {scope} to configure."}, status=404)
         touchpoint = request.query_params.get("touchpoint")
@@ -60,7 +73,7 @@ class SettingsView(APIView):
             return Response({"detail": "Give scope and key."}, status=400)
         if saving and "value" not in data:
             return Response({"detail": "Give a value (DELETE removes one)."}, status=400)
-        owner = self._owner(request)
+        owner = _who(request, scope)
         try:
             if saving:
                 service.save(owner, scope, key, data["value"], touchpoint=touchpoint)
@@ -93,7 +106,7 @@ class KeysView(APIView):
         from llm_kit.scoped import keys
 
         scope = request.query_params.get("scope", "user")
-        owner = SettingsView._owner(self, request)
+        owner = _who(request, scope)
         try:
             listed = keys.list_keys(owner, scope)
         except service.NotPermitted as e:
@@ -111,7 +124,7 @@ class KeysView(APIView):
         from llm_kit.scoped import keys
 
         data = request.data if isinstance(request.data, dict) else {}
-        owner = SettingsView._owner(self, request)
+        owner = _who(request, str(data.get("scope") or ""))
         try:
             row = keys.add_key(
                 owner,
@@ -136,9 +149,10 @@ class KeyDetailView(APIView):
     def delete(self, request, pk: int):
         from llm_kit.scoped import keys
 
-        owner = SettingsView._owner(self, request)
+        scope = request.query_params.get("scope", "user")
+        owner = _who(request, scope)
         try:
-            removed = keys.remove_key(owner, request.query_params.get("scope", "user"), pk)
+            removed = keys.remove_key(owner, scope, pk)
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=403)
         return Response(status=204 if removed else 404)
@@ -146,8 +160,10 @@ class KeyDetailView(APIView):
 
 class BudgetsView(APIView):
     """Spending limits, with what has been spent: ``GET llm/api/budgets/?scope=tenant|member|user``;
-    ``PUT {"scope", "period", "amount", "touchpoint"?, "counts"?}`` sets one; ``DELETE {"scope",
-    "period", "touchpoint"?}`` removes it. Who may set each scope's budgets: ``BUDGET_EDITORS``."""
+    ``PUT {"scope", "period", "amount", "touchpoint"?, "counts"?, "member"?}`` sets one; ``DELETE
+    {"scope", "period", "touchpoint"?, "member"?}`` removes it. Who may set each scope's budgets:
+    ``BUDGET_EDITORS``. ``member`` (a user id) is one member's own budget; ``scope_id`` lets a
+    platform admin act on another tenant or user."""
 
     permission_classes = [IsAuthenticated]
 
@@ -157,25 +173,31 @@ class BudgetsView(APIView):
         scope = request.query_params.get("scope", "user")
         if scope not in budgets.BUDGET_SCOPES:
             return Response({"detail": f"scope must be one of {', '.join(budgets.BUDGET_SCOPES)}."}, status=400)
-        owner = SettingsView._owner(self, request)
+        owner = _who(request, scope)
+        member = request.query_params.get("member")
         try:
-            listed = budgets.list_for(owner, scope)
+            listed = budgets.list_for(owner, scope, member)
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=404)
-        return Response(
-            {
-                "scope": scope,
-                "periods": budgets.periods(),
-                "editable": budgets.can_set(owner, scope),
-                "budgets": listed,
-            }
-        )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+        body = {
+            "scope": scope,
+            "periods": budgets.periods(),
+            "editable": budgets.can_set(owner, scope),
+            "budgets": listed,
+        }
+        if scope == "member" and not member and body["editable"]:
+            body["members"] = service.members(service.scope_ids(owner)["tenant"])  # None: no TENANT_MEMBERS
+            body["member_budgets"] = budgets.member_overrides(owner)
+        return Response(body)
 
     def _change(self, request, saving: bool):
         from llm_kit.scoped import budgets
 
         data = request.data if isinstance(request.data, dict) else {}
-        owner = SettingsView._owner(self, request)
+        owner = _who(request, str(data.get("scope") or ""))
+        member = data.get("member")
         scope, period, touchpoint = (
             str(data.get("scope") or ""),
             str(data.get("period") or ""),
@@ -187,10 +209,16 @@ class BudgetsView(APIView):
                     return Response({"detail": "Give an amount (USD)."}, status=400)
                 return Response(
                     budgets.set_budget(
-                        owner, scope, period, data["amount"], touchpoint=touchpoint, counts=data.get("counts") or "all"
+                        owner,
+                        scope,
+                        period,
+                        data["amount"],
+                        touchpoint=touchpoint,
+                        counts=data.get("counts") or "all",
+                        member=member,
                     )
                 )
-            removed = budgets.remove_budget(owner, scope, period, touchpoint=touchpoint)
+            removed = budgets.remove_budget(owner, scope, period, touchpoint=touchpoint, member=member)
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=403)
         except ValueError as e:
@@ -212,9 +240,10 @@ class KeyTestView(APIView):
     def post(self, request, pk: int):
         from llm_kit.scoped import keys
 
-        owner = SettingsView._owner(self, request)
+        scope = request.query_params.get("scope", "user")
+        owner = _who(request, scope)
         try:
-            result = keys.test_key(owner, request.query_params.get("scope", "user"), pk)
+            result = keys.test_key(owner, scope, pk)
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=403)
         return Response(result) if result is not None else Response(status=404)

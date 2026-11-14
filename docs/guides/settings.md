@@ -153,7 +153,33 @@ DELETE llm/api/budgets/   {"scope": "member", "period": "day"}
               "spent": "3.1000", "remaining": "6.9000", "resets_at": "2026-12-01T00:00:00+03:00"}]}
 ```
 
-The budget always belongs to the requester's own tenant or user. `editable` says whether they may change it.
+The budget belongs to the requester's own tenant or user, unless a platform admin names another (see below). `editable` says whether they may change it.
+
+### One member's budget
+
+A tenant's managers can give one member a budget of their own, which replaces the all-members budget for that member: `PUT llm/api/budgets/ {"scope": "member", "member": <user id>, "period": "day", "amount": "10"}`. llm-kit has to know who belongs to a tenant, so say how to find out:
+
+```python
+LLM_KIT = {"TENANT_MEMBERS": "myapp.tenancy:member_ids"}   # fn(tenant_id) -> users or user ids
+```
+
+`GET llm/api/budgets/?scope=member` then also returns `members` (ids, for a picker) and `member_budgets`. The budgets template shows members' own budgets and a "For" picker. Without `TENANT_MEMBERS`, only platform admins can set one member's budget.
+
+## Managing other tenants and users
+
+Platform admins (those who may change the `platform` scope) may change every scope. Add `scope_id` to manage a given tenant's or user's settings, keys or budgets from your own staff pages:
+
+```
+GET  llm/api/settings/?scope=tenant&scope_id=42
+PUT  llm/api/budgets/   {"scope": "tenant", "scope_id": 42, "period": "month", "amount": "500"}
+```
+
+```django
+{% llm_kit_settings scope="tenant" scope_id=workspace.pk %}
+{% llm_kit_budgets scope="tenant" scope_id=workspace.pk %}
+```
+
+For anyone else, `scope_id` is refused (403, or a template that shows nothing).
 
 ## Who may change what
 
@@ -165,7 +191,7 @@ LLM_KIT = {"SCOPE_PERMISSIONS": {"tenant": "myapp.permissions:manages_workspace"
 
 Without a function, the defaults are:
 
-- `platform`: users with the `llm_kit.change_scopedsetting` permission (superusers have it).
+- `platform`: users with the `llm_kit.change_scopedsetting` permission (superusers have it). They may change every other scope too.
 - `tenant`: nobody. Say who manages a workspace before tenants can save anything.
 - `user`: the user themselves.
 

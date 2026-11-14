@@ -13,7 +13,7 @@
         <td>{% if b.resets %}<time datetime="{{ b.resets_at }}">{{ b.resets|date:"M j, H:i" }}</time>{% endif %}</td>
         <td>{% if editable %}<form method="post" action="{% url 'llm_kit:settings-budget-save' %}">
           <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">
+          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}"><input type="hidden" name="next" value="{{ next }}">
           <input type="hidden" name="period" value="{{ b.period }}"><input type="hidden" name="touchpoint" value="{{ b.touchpoint }}">
           <button type="submit" name="remove" value="1">Remove</button></form>{% endif %}</td>
       </tr>
@@ -22,13 +22,34 @@
     {% endfor %}
     </tbody>
   </table>
+  {% if member_budgets %}
+  <h4>Members with their own budget</h4>
+  <table class="llm-kit-member-budgets">
+    <thead><tr><th>Member</th><th>Touchpoint</th><th>Period</th><th>Spent</th><th>Budget</th><th></th></tr></thead>
+    <tbody>
+    {% for b in member_budgets %}
+      <tr>
+        <td>{{ b.member }}</td><td>{{ b.touchpoint|default:"All" }}</td><td>{{ b.period }}</td>
+        <td>${{ b.spent|floatformat:2 }}</td><td>${{ b.amount }}</td>
+        <td><form method="post" action="{% url 'llm_kit:settings-budget-save' %}">
+          <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}">
+          <input type="hidden" name="next" value="{{ next }}"><input type="hidden" name="member" value="{{ b.member }}">
+          <input type="hidden" name="period" value="{{ b.period }}"><input type="hidden" name="touchpoint" value="{{ b.touchpoint }}">
+          <button type="submit" name="remove" value="1">Remove</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% if editable %}
   <form class="llm-kit-budget-set" method="post" action="{% url 'llm_kit:settings-budget-save' %}">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-    <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}"><input type="hidden" name="next" value="{{ next }}">
     <label>Amount (USD) <input type="number" name="amount" min="0" step="any" required></label>
     <label>Per <select name="period">{% for p in periods %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></label>
     <label>Touchpoint <select name="touchpoint"><option value="">All</option>{% for t in touchpoints %}<option value="{{ t }}">{{ t }}</option>{% endfor %}</select></label>
+    {% if members %}<label>For <select name="member"><option value="">Every member</option>{% for id, name in members %}<option value="{{ id }}">{{ name }}</option>{% endfor %}</select></label>{% endif %}
     <label>Counts <select name="counts"><option value="all">All calls</option><option value="platform_keys">Only calls on platform keys</option></select></label>
     <button type="submit">Set budget</button>
   </form>
