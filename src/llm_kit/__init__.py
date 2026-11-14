@@ -8,9 +8,19 @@ Most-used entry points::
 
 __version__ = "0.2.0.dev0"
 
-__all__ = ["ClientChoice", "DjangoSaver", "ServerChoice", "agent", "get_graph", "get_touchpoint", "touchpoint"]
+__all__ = [
+    "AllModelsFailed",
+    "ClientChoice",
+    "DjangoSaver",
+    "RetryPolicy",
+    "ServerChoice",
+    "agent",
+    "get_graph",
+    "get_touchpoint",
+    "touchpoint",
+]
 
-_CORE = {"touchpoint", "get_touchpoint", "ClientChoice", "ServerChoice"}
+_CORE = {"touchpoint", "get_touchpoint", "ClientChoice", "ServerChoice", "RetryPolicy"}
 
 
 def __getattr__(name):
@@ -19,6 +29,10 @@ def __getattr__(name):
         from llm_kit.core import touchpoints
 
         return getattr(touchpoints, name)
+    if name == "AllModelsFailed":
+        from llm_kit.core.errors import AllModelsFailed
+
+        return AllModelsFailed
     if name == "agent":
         from llm_kit.core.agents import agent
 

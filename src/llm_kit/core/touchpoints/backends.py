@@ -14,22 +14,36 @@ and llm-kit's call recording read.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
+import logging
 import os
 import random
 import threading
-from collections.abc import Callable, Sequence
+import time
+from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import Runnable, RunnableWithFallbacks
+from langchain_core.runnables import Runnable, RunnableConfig, RunnableWithFallbacks
+from langchain_core.runnables.config import (
+    ensure_config,
+    get_async_callback_manager_for_config,
+    get_callback_manager_for_config,
+    patch_config,
+    set_config_context,
+)
+from langchain_core.runnables.utils import coro_with_context
 
 from llm_kit.core import config
-from llm_kit.core.errors import ConfigError
+from llm_kit.core.errors import AllModelsFailed, ConfigError
 from llm_kit.core.graphs import import_target
 from llm_kit.core.touchpoints.env import KEYLESS_PROVIDERS, ResolutionEnv, provider_of
 from llm_kit.core.touchpoints.resolve import Resolution
+from llm_kit.core.touchpoints.retry import RetryPolicy
+
+logger = logging.getLogger("llm_kit.touchpoints")
 
 Factory = Callable[[str, dict[str, Any], list[str]], BaseChatModel]
 
@@ -48,33 +62,233 @@ LANGCHAIN_PROVIDERS = {
 
 
 class TouchpointChatModel(RunnableWithFallbacks):
-    """A primary chat model with fallbacks.
+    """A primary chat model with fallbacks, waiting out short rate limits on each.
 
-    ``RunnableWithFallbacks`` forwards ``bind_tools`` only when the method's
-    return annotation resolves at runtime; otherwise fallbacks are dropped or an
-    error is raised. These explicit methods always apply to every candidate.
+    Each candidate is tried in turn. A rate limit or overload that the touchpoint's
+    ``RetryPolicy`` allows is waited out and the same model tried again; anything else
+    moves to the next candidate. When every candidate fails, ``AllModelsFailed`` lists
+    each model's error (a single candidate re-raises its own error).
+
+    ``RunnableWithFallbacks`` forwards ``bind_tools`` only when the method's return
+    annotation resolves at runtime; otherwise fallbacks are dropped or an error is raised.
+    These explicit methods always apply to every candidate.
     """
+
+    retry: Any = None  # RetryPolicy
+    refs: list[str] = []  # the model behind each candidate, for errors
+    touchpoint: str = ""
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> TouchpointChatModel:
         return self._map(lambda m: m.bind_tools(tools, **kwargs))
 
-    def with_structured_output(self, schema: Any, **kwargs: Any) -> RunnableWithFallbacks:
-        return RunnableWithFallbacks(
-            runnable=self.runnable.with_structured_output(schema, **kwargs),
-            fallbacks=[f.with_structured_output(schema, **kwargs) for f in self.fallbacks],
-            exceptions_to_handle=self.exceptions_to_handle,
-        )
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> TouchpointChatModel:
+        return self._map(lambda m: m.with_structured_output(schema, **kwargs))
 
     def _map(self, fn: Callable[[Any], Runnable]) -> TouchpointChatModel:
         return TouchpointChatModel(
             runnable=fn(self.runnable),
             fallbacks=[fn(f) for f in self.fallbacks],
             exceptions_to_handle=self.exceptions_to_handle,
+            retry=self.retry,
+            refs=self.refs,
+            touchpoint=self.touchpoint,
         )
 
     @property
     def models(self) -> list[Runnable]:
         return [self.runnable, *self.fallbacks]
+
+    # -------------------------------------------------------------- calling
+
+    def _ref(self, index: int) -> str:
+        return self.refs[index] if index < len(self.refs) else f"candidate {index}"
+
+    def _wait_for(self, exc: BaseException, attempt: int, index: int) -> float | None:
+        policy = self.retry or RetryPolicy.NEVER
+        delay = policy.delay(exc, attempt)
+        if delay is not None:
+            logger.info(
+                "%s: %s refused (%s); waiting %.1fs before trying it again (%d of %d)",
+                self.touchpoint or "touchpoint",
+                self._ref(index),
+                type(exc).__name__,
+                delay,
+                attempt + 1,
+                policy.attempts,
+            )
+        return delay
+
+    def _failure(self, errors: list[tuple[str, BaseException]]) -> BaseException:
+        if len(errors) == 1:
+            return errors[0][1]
+        failed = AllModelsFailed(self.touchpoint, errors)
+        failed.__cause__ = errors[-1][1]
+        return failed
+
+    def _start(self, input: Any, config: RunnableConfig | None, callback_manager):
+        return callback_manager.on_chain_start(
+            None, input, name=config.get("run_name") or self.get_name(), run_id=config.pop("run_id", None)
+        )
+
+    def invoke(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> Any:
+        config = ensure_config(config)
+        run_manager = self._start(input, config, get_callback_manager_for_config(config))
+        errors: list[tuple[str, BaseException]] = []
+        for index, runnable in enumerate(self.runnables):
+            attempt = 0
+            while True:
+                try:
+                    child = patch_config(config, callbacks=run_manager.get_child())
+                    with set_config_context(child) as context:
+                        output = context.run(runnable.invoke, input, child, **kwargs)
+                except self.exceptions_to_handle as e:
+                    delay = self._wait_for(e, attempt, index)
+                    if delay is None:
+                        errors.append((self._ref(index), e))
+                        break
+                    attempt += 1
+                    _sleep(delay)
+                except BaseException as e:
+                    run_manager.on_chain_error(e)
+                    raise
+                else:
+                    run_manager.on_chain_end(output)
+                    return output
+        failure = self._failure(errors)
+        run_manager.on_chain_error(failure)
+        raise failure
+
+    async def ainvoke(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> Any:
+        config = ensure_config(config)
+        run_manager = await self._start(input, config, get_async_callback_manager_for_config(config))
+        errors: list[tuple[str, BaseException]] = []
+        for index, runnable in enumerate(self.runnables):
+            attempt = 0
+            while True:
+                try:
+                    child = patch_config(config, callbacks=run_manager.get_child())
+                    with set_config_context(child) as context:
+                        coro = context.run(runnable.ainvoke, input, child, **kwargs)
+                        output = await coro_with_context(coro, context)
+                except self.exceptions_to_handle as e:
+                    delay = self._wait_for(e, attempt, index)
+                    if delay is None:
+                        errors.append((self._ref(index), e))
+                        break
+                    attempt += 1
+                    await _asleep(delay)
+                except BaseException as e:
+                    await run_manager.on_chain_error(e)
+                    raise
+                else:
+                    await run_manager.on_chain_end(output)
+                    return output
+        failure = self._failure(errors)
+        await run_manager.on_chain_error(failure)
+        raise failure
+
+    # A failure after the first chunk can't move to another model (the caller already has
+    # part of the answer), so streams wait and fall back only before the first chunk.
+
+    def stream(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> Iterator[Any]:
+        config = ensure_config(config)
+        run_manager = self._start(input, config, get_callback_manager_for_config(config))
+        errors: list[tuple[str, BaseException]] = []
+        stream = None
+        for index, runnable in enumerate(self.runnables):
+            attempt = 0
+            while stream is None:
+                try:
+                    child = patch_config(config, callbacks=run_manager.get_child())
+                    with set_config_context(child) as context:
+                        candidate = context.run(runnable.stream, input, child, **kwargs)
+                        chunk = context.run(next, candidate)
+                    stream = candidate
+                except self.exceptions_to_handle as e:
+                    delay = self._wait_for(e, attempt, index)
+                    if delay is None:
+                        errors.append((self._ref(index), e))
+                        break
+                    attempt += 1
+                    _sleep(delay)
+                except BaseException as e:
+                    run_manager.on_chain_error(e)
+                    raise
+            if stream is not None:
+                break
+        if stream is None:
+            failure = self._failure(errors)
+            run_manager.on_chain_error(failure)
+            raise failure
+        yield chunk
+        output = chunk
+        try:
+            for chunk in stream:
+                yield chunk
+                try:
+                    output = output + chunk
+                except TypeError:
+                    output = None
+        except BaseException as e:
+            run_manager.on_chain_error(e)
+            raise
+        run_manager.on_chain_end(output)
+
+    async def astream(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> AsyncIterator[Any]:
+        config = ensure_config(config)
+        run_manager = await self._start(input, config, get_async_callback_manager_for_config(config))
+        errors: list[tuple[str, BaseException]] = []
+        stream = None
+        for index, runnable in enumerate(self.runnables):
+            attempt = 0
+            while stream is None:
+                try:
+                    child = patch_config(config, callbacks=run_manager.get_child())
+                    with set_config_context(child) as context:
+                        candidate = runnable.astream(input, child, **kwargs)
+                        chunk = await coro_with_context(anext(candidate), context)
+                    stream = candidate
+                except self.exceptions_to_handle as e:
+                    delay = self._wait_for(e, attempt, index)
+                    if delay is None:
+                        errors.append((self._ref(index), e))
+                        break
+                    attempt += 1
+                    await _asleep(delay)
+                except BaseException as e:
+                    await run_manager.on_chain_error(e)
+                    raise
+            if stream is not None:
+                break
+        if stream is None:
+            failure = self._failure(errors)
+            await run_manager.on_chain_error(failure)
+            raise failure
+        yield chunk
+        output = chunk
+        try:
+            async for chunk in stream:
+                yield chunk
+                try:
+                    output = output + chunk
+                except TypeError:
+                    output = None
+        except BaseException as e:
+            await run_manager.on_chain_error(e)
+            raise
+        await run_manager.on_chain_end(output)
+
+    # One call per input through the loop above, instead of RunnableWithFallbacks' batching.
+    batch = Runnable.batch
+    abatch = Runnable.abatch
+
+
+def _sleep(seconds: float) -> None:
+    time.sleep(seconds)
+
+
+async def _asleep(seconds: float) -> None:
+    await asyncio.sleep(seconds)
 
 
 # ------------------------------------------------------------------ backends
@@ -150,8 +364,9 @@ def get_factory(name: str | None) -> Factory:
     return _factories[name]
 
 
-def build_for(tp, resolution: Resolution, env: ResolutionEnv) -> Runnable:
-    """The runnable for a resolution: one chat model, or a ``TouchpointChatModel`` with fallbacks."""
+def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy | None = None) -> Runnable:
+    """The runnable for a resolution: the chat model itself when there is one candidate and
+    nothing to wait for, otherwise a ``TouchpointChatModel`` (fallbacks and/or retry waits)."""
     factory = get_factory(tp.backend)
     metadata = {
         "llm_kit_touchpoint": tp.name,
@@ -173,6 +388,12 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv) -> Runnable:
             existing = model.callbacks if isinstance(model.callbacks, list) else []
             model.callbacks = [*existing, handler]
         models.append(model)
-    if len(models) == 1:
+    if len(models) == 1 and not (retry and retry.waits):
         return models[0]
-    return TouchpointChatModel(runnable=models[0], fallbacks=models[1:])
+    return TouchpointChatModel(
+        runnable=models[0],
+        fallbacks=models[1:],
+        retry=retry or RetryPolicy.NEVER,
+        refs=list(resolution.candidates),
+        touchpoint=tp.name,
+    )

@@ -117,8 +117,7 @@ def _check(parent: AgentSpec, name: str, config, env) -> AgentSpec:
     stack = stack_of(config) or (parent.name,)
     if name in stack:
         raise Refused(f"{name} is already working on this request above you; do the task yourself.")
-    if len(stack) > _max_depth(config):
-        raise Refused("Subagents can't be nested any deeper; do the task yourself.")
+    check_depth(config)
     try:
         sub = effective(get_agent(name), env)
     except UnknownAgent:
@@ -186,15 +185,36 @@ def _forward(write, mode: str, chunk) -> None:
         write(chunk)
 
 
-def run_subagent(parent, name, task, config, env, *, call_id=None, parent_messages=None) -> AgentResult:
-    sub, graph, start, child, thread_id = _setup(parent, name, task, config, env, call_id, parent_messages)
+def drive(graph, start, config) -> dict:
+    """Run ``graph`` to the end inside a parent run, forwarding its messages to the parent's stream."""
     write, state = _writer(), {}
-    for mode, chunk in graph.stream(start, child, stream_mode=_MODES):
+    for mode, chunk in graph.stream(start, config, stream_mode=_MODES):
         if mode == "values":
             state = chunk
         else:
             _forward(write, mode, chunk)
-    return from_state(sub, state, thread_id)
+    return state
+
+
+async def adrive(graph, start, config) -> dict:
+    write, state = _writer(), {}
+    async for mode, chunk in graph.astream(start, config, stream_mode=_MODES):
+        if mode == "values":
+            state = chunk
+        else:
+            _forward(write, mode, chunk)
+    return state
+
+
+def check_depth(config) -> None:
+    """Refuse an agent run that would nest deeper than the tree allows."""
+    if len(stack_of(config)) > _max_depth(config):
+        raise Refused("Subagents can't be nested any deeper; do the task yourself.")
+
+
+def run_subagent(parent, name, task, config, env, *, call_id=None, parent_messages=None) -> AgentResult:
+    sub, graph, start, child, thread_id = _setup(parent, name, task, config, env, call_id, parent_messages)
+    return from_state(sub, drive(graph, start, child), thread_id)
 
 
 async def arun_subagent(parent, name, task, config, env, *, call_id=None, parent_messages=None) -> AgentResult:
@@ -203,13 +223,7 @@ async def arun_subagent(parent, name, task, config, env, *, call_id=None, parent
     sub, graph, start, child, thread_id = await sync_to_async(_setup, thread_sensitive=True)(
         parent, name, task, config, env, call_id, parent_messages
     )
-    write, state = _writer(), {}
-    async for mode, chunk in graph.astream(start, child, stream_mode=_MODES):
-        if mode == "values":
-            state = chunk
-        else:
-            _forward(write, mode, chunk)
-    return from_state(sub, state, thread_id)
+    return from_state(sub, await adrive(graph, start, child), thread_id)
 
 
 def _reply(name: str, result: AgentResult) -> str:

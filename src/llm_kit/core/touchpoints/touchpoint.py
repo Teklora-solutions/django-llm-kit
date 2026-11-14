@@ -37,6 +37,7 @@ from llm_kit.core.errors import ConfigError, UnknownTouchpoint
 from llm_kit.core.touchpoints.env import ResolutionEnv, default_env
 from llm_kit.core.touchpoints.policy import Choice, ServerChoice
 from llm_kit.core.touchpoints.resolve import Resolution, resolve
+from llm_kit.core.touchpoints.retry import RetryPolicy, policy_for
 from llm_kit.core.touchpoints.structured import parse_as
 
 _registry: dict[str, Touchpoint] = {}
@@ -62,6 +63,7 @@ class Touchpoint:
     description: str = ""
     backend: str | None = None  # None = LLM_KIT["MODEL_BACKEND"]
     capture: bool | None = None  # store prompts/responses; None = LLM_KIT["CAPTURE_CONTENT"]
+    retry: RetryPolicy | None = None  # waits before falling back; None = LLM_KIT["RETRY"]
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -71,6 +73,7 @@ class Touchpoint:
             )
         if isinstance(self.fallbacks, str):
             object.__setattr__(self, "fallbacks", (self.fallbacks,))
+        object.__setattr__(self, "retry", RetryPolicy.coerce(self.retry))
 
     # ----------------------------------------------------------- resolution
 
@@ -88,11 +91,13 @@ class Touchpoint:
         *,
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
         **params: Any,
     ) -> Runnable:
         """A chat model for this touchpoint, wrapped with its fallbacks.
 
         ``params`` override the touchpoint's params for this call (e.g. ``max_tokens``).
+        ``retry`` overrides how long a short rate limit is waited out before falling back.
         The returned runnable supports ``invoke``/``stream``/``bind_tools``/``with_structured_output``.
         """
         from llm_kit.core.touchpoints.backends import build_for
@@ -100,7 +105,7 @@ class Touchpoint:
         resolution = self.resolve(requested, config=config, env=env)
         if params:
             resolution.params = {**resolution.params, **params}
-        return build_for(self, resolution, env or default_env())
+        return build_for(self, resolution, env or default_env(), retry=policy_for(self, config, retry))
 
     # ------------------------------------------------------- one-shot calls
 
@@ -112,6 +117,7 @@ class Touchpoint:
         requested: str | None = None,
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
         **params: Any,
     ) -> Any:
         """Call the model once. With ``schema``, return a validated instance of it.
@@ -119,7 +125,7 @@ class Touchpoint:
         Uses native structured output when the model supports it, otherwise
         parses JSON out of the reply (code fences and surrounding prose are tolerated).
         """
-        llm = self.model(requested, config=config, env=env, **params)
+        llm = self.model(requested, config=config, env=env, retry=retry, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
         if schema is None:
@@ -138,9 +144,10 @@ class Touchpoint:
         requested: str | None = None,
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
         **params: Any,
     ) -> Any:
-        llm = self.model(requested, config=config, env=env, **params)
+        llm = self.model(requested, config=config, env=env, retry=retry, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
         if schema is None:
@@ -207,6 +214,7 @@ def touchpoint(
     description: str = "",
     backend: str | None = None,
     capture: bool | None = None,
+    retry: RetryPolicy | dict | str | None = None,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads)."""
     tp = Touchpoint(
@@ -219,6 +227,7 @@ def touchpoint(
         description=description,
         backend=backend,
         capture=capture,
+        retry=retry,
     )
     with _lock:
         _registry[name] = tp
@@ -243,4 +252,4 @@ def _unregister(name: str) -> None:
     _registry.pop(name, None)
 
 
-__all__ = ["Touchpoint", "all_touchpoints", "get_touchpoint", "touchpoint", "BaseChatModel"]
+__all__ = ["RetryPolicy", "Touchpoint", "all_touchpoints", "get_touchpoint", "touchpoint", "BaseChatModel"]

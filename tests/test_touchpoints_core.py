@@ -208,7 +208,7 @@ def test_problems_report():
 
 
 def test_model_single_candidate_is_plain_chat_model_with_metadata():
-    llm = tp(params={"temperature": 0}).model(env=FakeEnv(), max_tokens=7)
+    llm = tp(params={"temperature": 0}).model(env=FakeEnv(), max_tokens=7, retry="never")
     assert isinstance(llm, Echo)
     assert llm.metadata["llm_kit_touchpoint"] == "t.chat" and llm.metadata["llm_kit_chosen_by"] == "code"
     assert "llm_kit:t.chat" in llm.tags

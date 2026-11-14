@@ -32,6 +32,34 @@ summarise.resolve()                           # which model(s) and why, without 
 
 `model()` returns a LangChain chat model that wraps the default and its fallbacks. `bind_tools` and `with_structured_output` are applied to every candidate, so fallbacks keep working after you bind tools. `complete()` also parses the raw reply when a model answers in text instead of structured output.
 
+## Rate limits and fallbacks
+
+Each candidate is tried in turn. A refusal that clears on its own (a rate limit, or a provider that's overloaded) is **waited out on the same model**, if the wait is short enough; anything else moves to the next fallback at once.
+
+- The wait is the one the provider asked for: a `Retry-After` header, a `retry_after` attribute, or the error text (`"retryDelay": "4s"`, `try again in 250ms`). A rate limit that doesn't say waits 20 s; an overloaded provider, 5 s.
+- A **daily quota** is never waited out. Gemini reports per-minute and per-day limits with the same 429; llm-kit reads the quota id to tell them apart.
+- How long to wait depends on who is waiting, so it's a `RetryPolicy(attempts, max_wait)`: up to `attempts` waits per model, none longer than `max_wait` seconds.
+
+```python
+from llm_kit import RetryPolicy, touchpoint
+
+digest = touchpoint("crm.digest", default=..., retry=RetryPolicy.BATCH)  # 4 waits of up to 65 s: a worker can wait
+chat.model(config=config, retry="never")                                 # this call never waits
+agents.run("crm.digest_writer", task, retry="batch")                     # every model call in this run
+```
+
+| Policy | Waits | Use for |
+|---|---|---|
+| `RetryPolicy.INTERACTIVE` (the default, `LLM_KIT["RETRY"]`) | 1 wait of up to 6 s | someone is watching the reply |
+| `RetryPolicy.BATCH` | 4 waits of up to 65 s | background jobs |
+| `RetryPolicy.NEVER` | none | fall back at once |
+
+The policy for a call is the first of: `model(retry=)` / `complete(retry=)`, `agents.run(retry=)`, `touchpoint(retry=)`, `LLM_KIT["RETRY"]`. A stream waits and falls back only before its first chunk; after that the caller already has part of the answer.
+
+When **every** model fails, the call raises `llm_kit.AllModelsFailed`. Its message lists each model's error, `errors` holds `(model, exception)` pairs in the order tried, and `__cause__` is the last one. A touchpoint with a single model raises that model's own error. Each attempt is a [recorded call](observability.md) with its error class.
+
+Provider SDKs retry on their own too (Anthropic's and OpenAI's clients retry twice by default). llm-kit's wait comes after theirs, so lower the SDK's `max_retries` in `params` if you want llm-kit to decide.
+
 ## Who chooses the model
 
 | Policy | When a client sends `"model"` | Options |

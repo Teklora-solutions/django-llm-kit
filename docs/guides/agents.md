@@ -61,6 +61,17 @@ async for event in agents.stream(...):          # token / message / update / end
 - Pass `thread=` (a `Thread`) or `thread_id=` to continue a conversation.
 - Without either, the run is **throwaway**: it and its subagents keep their state in memory, never in the database, and it is freed when the run ends. The recorded calls and runs are kept. This also means a throwaway run works inside a test transaction (Django's `TestCase`).
 - For threads your code owns (a WhatsApp number, a ticket), see [keyed threads](access.md#threads-your-code-keys).
+- `retry=` sets how long this run's model calls wait out a short rate limit (see [rate limits and fallbacks](touchpoints.md#rate-limits-and-fallbacks)).
+
+**Inside another agent's run** (from a tool, a code agent, or an orchestrator they call), `agents.run` **joins that request** instead of starting a new one:
+
+- it acts for the same caller, unless you pass `user=` or `tenant=`;
+- it shares the request's limits (depth and timeout; it doesn't use up a hand-off, because your code chose it, not the model);
+- it runs on its own thread under the parent's, `<thread>/<agent>/<id>`;
+- it is recorded as a subagent run in the request's tree, so the request's cost includes it;
+- its messages stream to the client like a subagent's.
+
+Pass `join=False` to start a separate request. `agents.stream` always starts one.
 
 ## The loop
 

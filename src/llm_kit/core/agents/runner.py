@@ -1,6 +1,9 @@
 """Running an agent from code: ``run(name, task)`` returns an ``AgentResult``.
 
 The run gets fresh limits (depth, hand-offs, timeout) shared with every subagent it starts.
+With ``nested=True`` (an agent run started inside another agent's run, see
+``llm_kit.agents.run``) it shares the parent's limits instead and its messages are
+forwarded to the parent's stream, like a subagent's.
 """
 
 from __future__ import annotations
@@ -50,9 +53,15 @@ def run(
     config: dict | None = None,
     env: AgentEnv | None = None,
     thread_id: str | None = None,
+    nested: bool = False,
 ) -> AgentResult:
     spec, graph, start, config = _start(name, task, config, env, thread_id)
-    state = graph.invoke(start, config)
+    if nested:
+        from llm_kit.core.agents.delegate import drive
+
+        state = drive(graph, start, config)
+    else:
+        state = graph.invoke(start, config)
     return from_state(spec, state, config["configurable"]["thread_id"])
 
 
@@ -63,7 +72,13 @@ async def arun(
     config: dict | None = None,
     env: AgentEnv | None = None,
     thread_id: str | None = None,
+    nested: bool = False,
 ) -> AgentResult:
     spec, graph, start, config = _start(name, task, config, env, thread_id)
-    state = await graph.ainvoke(start, config)
+    if nested:
+        from llm_kit.core.agents.delegate import adrive
+
+        state = await adrive(graph, start, config)
+    else:
+        state = await graph.ainvoke(start, config)
     return from_state(spec, state, config["configurable"]["thread_id"])

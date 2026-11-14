@@ -35,6 +35,10 @@ DEFAULTS: dict[str, Any] = {
     "MODEL_BACKEND": "auto",
     # Extra kwargs for litellm.Router when a provider has several keys.
     "LITELLM_ROUTER": {"routing_strategy": "simple-shuffle", "num_retries": 0},
+    # Waiting out a short rate limit (or overload) on a model before falling back to the next:
+    # {"attempts": waits per model, "max_wait": longest wait in seconds}. Per touchpoint:
+    # touchpoint(..., retry=RetryPolicy.BATCH); per call: model(retry=...) or agents.run(retry=...).
+    "RETRY": {"attempts": 1, "max_wait": 6.0},
     # Keys for encrypting ProviderKey rows: a list, newest first (rotation).
     # Each is a Fernet key or any passphrase (hashed to one).
     "ENCRYPTION_KEYS": None,

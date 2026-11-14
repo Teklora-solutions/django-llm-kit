@@ -10,7 +10,9 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Name | What it is |
 |---|---|
-| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint` |
+| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint` |
+| `RetryPolicy(attempts=0, max_wait=0.0)`, `RetryPolicy.BATCH`, `.INTERACTIVE`, `.NEVER` | how long a call waits out a [short rate limit](../guides/touchpoints.md#rate-limits-and-fallbacks) before falling back |
+| `AllModelsFailed` | raised when every model of a touchpoint failed; `errors` is `[(model, exception), …]` |
 | `get_touchpoint(name)` | a declared touchpoint |
 | `ServerChoice(on_requested="ignore")`, `ClientChoice(allow=("*",), requires={}, max_price_input=None, max_price_output=None, on_disallowed="reject", use_fallbacks=True)` | model choice policies |
 | `agent(name, *, description, touchpoint, prompt, tools, subagents, output, max_steps, fork, defer_tools, essential, history, tool_result_chars)` | declare an [agent](../guides/agents.md); `@agent.code(name, …)` for Python agents |
@@ -21,13 +23,13 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Method | Returns |
 |---|---|
-| `model(requested=None, *, config=None, **params)` | a LangChain chat model with fallbacks; `params` override the touchpoint's for this call |
-| `complete(prompt, *, schema=None, requested=None, config=None, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
+| `model(requested=None, *, config=None, retry=None, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call |
+| `complete(prompt, *, schema=None, requested=None, config=None, retry=None, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
 
 ## `llm_kit.agents`
 
-`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
+`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
 
 ## `llm_kit.tools`
 

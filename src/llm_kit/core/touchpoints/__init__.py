@@ -3,6 +3,7 @@
 from llm_kit.core.touchpoints.env import ModelInfo, NullEnv, Override, ResolutionEnv, set_default_env
 from llm_kit.core.touchpoints.policy import ClientChoice, ServerChoice
 from llm_kit.core.touchpoints.resolve import Resolution, problems
+from llm_kit.core.touchpoints.retry import RetryPolicy, retry_after
 from llm_kit.core.touchpoints.touchpoint import Touchpoint, all_touchpoints, get_touchpoint, touchpoint
 
 __all__ = [
@@ -12,11 +13,13 @@ __all__ = [
     "Override",
     "Resolution",
     "ResolutionEnv",
+    "RetryPolicy",
     "ServerChoice",
     "Touchpoint",
     "all_touchpoints",
     "get_touchpoint",
     "problems",
+    "retry_after",
     "set_default_env",
     "touchpoint",
 ]

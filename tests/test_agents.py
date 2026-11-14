@@ -599,3 +599,111 @@ def test_your_own_callbacks_run_alongside_recording(temp_agents, scripts):
     scripts[H] = ["hi"]
     agents.run("t.watched", "hello", callbacks=[mine])
     assert mine.ends == 1
+
+
+# ------------------------------------------------------------- agents.run inside a running agent
+
+
+@pytest.fixture
+def code_agent():
+    names = []
+
+    def declare(name, fn):
+        names.append(name)
+        return agents.agent.code(name, description=f"{name} for a test")(fn)
+
+    yield declare
+    for name in names:
+        agent_spec._unregister(name)
+
+
+def _recorded(settings):
+    from llm_kit.core.observability import flush
+    from llm_kit.observability.setup import configure
+
+    flush()
+    settings.LLM_KIT = {**settings.LLM_KIT, "RECORD_SINKS": ["database"]}
+    configure()
+
+
+def test_agents_run_inside_an_agent_joins_its_request(world, scripts, settings, code_agent):
+    from llm_kit.core.observability import flush, recorder
+    from llm_kit.models import LLMRun
+
+    seen_inside = {}
+
+    def orchestrate(task, ctx):
+        # Not a declared subagent: plain code that runs an agent, as an orchestrator would.
+        report = agents.run("tests.researcher", task)
+        seen_inside["thread"] = report.thread_id
+        return {"answer": report.output.answer}
+
+    code_agent("t.orchestrator", orchestrate)
+    _recorded(settings)
+    try:
+        scripts[R] = ["found", call("Report", {"answer": "joined"})]
+        result = agents.run("t.orchestrator", "look", user=world["alice"], thread_id="orch-1")
+        assert flush()
+    finally:
+        recorder.configure([], None)
+
+    assert result.output == {"answer": "joined"}
+    assert seen_inside["thread"].startswith("orch-1/tests.researcher/")
+    root = LLMRun.objects.get(thread_id="orch-1", parent_run_id=None)
+    sub = LLMRun.objects.get(parent_run_id=root.run_id)
+    assert (sub.agent, sub.depth, sub.thread_id) == ("tests.researcher", 1, seen_inside["thread"])
+    assert sub.user == str(world["alice"].pk)  # the request's caller
+    assert root.calls == 2  # the nested run's model call counts towards the request
+    assert "find_invoices" in seen(R)[0]["tools"]  # alice's tools: it acted for her
+
+
+def test_a_nested_run_is_limited_by_the_requests_depth(world, scripts, settings, code_agent):
+    from llm_kit.core.agents.delegate import Refused
+
+    settings.LLM_KIT = {**settings.LLM_KIT, "AGENT_MAX_DEPTH": 0}
+
+    def orchestrate(task, ctx):
+        try:
+            agents.run("tests.researcher", task)
+        except Refused as e:
+            return f"refused: {e}"
+        return "ran"
+
+    code_agent("t.orchestrator", orchestrate)
+    assert agents.run("t.orchestrator", "x", user=world["alice"]).text.startswith("refused: ")
+
+
+def test_join_false_starts_a_separate_request(world, scripts, settings, code_agent):
+    from llm_kit.core.observability import flush, recorder
+    from llm_kit.models import LLMRun
+
+    def orchestrate(task, ctx):
+        return agents.run("tests.researcher", task, user=ctx.caller.user, join=False).output.answer
+
+    code_agent("t.orchestrator", orchestrate)
+    _recorded(settings)
+    try:
+        scripts[R] = ["found", call("Report", {"answer": "apart"})]
+        agents.run("t.orchestrator", "x", user=world["alice"], thread_id="orch-2")
+        assert flush()
+    finally:
+        recorder.configure([], None)
+    assert LLMRun.objects.filter(parent_run_id__isnull=False).count() == 0
+    assert LLMRun.objects.filter(agent="tests.researcher", depth=0).count() == 1
+
+
+def test_agents_run_retry_reaches_the_model_calls(world, scripts, monkeypatch):
+    from llm_kit.core.touchpoints import RetryPolicy, get_touchpoint
+
+    seen_policies = []
+    original = type(get_touchpoint("tests.researcher")).model
+
+    def spy(self, *a, **kw):
+        llm = original(self, *a, **kw)
+        seen_policies.append(getattr(llm, "retry", None))
+        return llm
+
+    monkeypatch.setattr(type(get_touchpoint("tests.researcher")), "model", spy)
+    scripts[R] = ["found", call("Report", {"answer": "ok"})]
+    agents.run("tests.researcher", "x", user=world["alice"], retry="batch")
+    assert seen_policies and all(p == RetryPolicy.BATCH for p in seen_policies)

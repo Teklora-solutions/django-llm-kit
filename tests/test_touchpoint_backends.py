@@ -48,7 +48,11 @@ def test_litellm_single_key_and_params():
     from langchain_litellm import ChatLiteLLM
 
     t = touchpoint(
-        "t.ll", default="anthropic/claude-sonnet-5-5", params={"temperature": 0, "custom_option": 5}, backend="litellm"
+        "t.ll",
+        default="anthropic/claude-sonnet-5-5",
+        params={"temperature": 0, "custom_option": 5},
+        backend="litellm",
+        retry="never",
     )
     llm = t.model(env=FakeEnv(keys={"anthropic": ["sk-1"]}))
     assert isinstance(llm, ChatLiteLLM)
@@ -61,7 +65,7 @@ def test_litellm_single_key_and_params():
 def test_litellm_key_pool_uses_a_router():
     from langchain_litellm import ChatLiteLLMRouter
 
-    t = touchpoint("t.pool", default="anthropic/claude-sonnet-5-5", backend="litellm")
+    t = touchpoint("t.pool", default="anthropic/claude-sonnet-5-5", backend="litellm", retry="never")
     llm = t.model(env=FakeEnv(keys={"anthropic": ["sk-1", "sk-2", "sk-3"]}))
     assert isinstance(llm, ChatLiteLLMRouter)
     assert [d["litellm_params"]["api_key"] for d in llm.router.model_list] == ["sk-1", "sk-2", "sk-3"]

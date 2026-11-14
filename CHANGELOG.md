@@ -14,6 +14,9 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **Agents and subagents:** one harness for every agent; subagents are the same harness with another model, prompt and tools. Delegation, depth/hand-off/time limits, history windows, deferred tools, admin overrides and a recorded run tree.
 - **Thread ownership:** threads belong to a user, a visitor's session, a key your code chose, or nobody; visitor threads move to the account at sign-in; tenant isolation.
 - **Checkpointer choice:** `CHECKPOINTER` can be `DjangoSaver`, LangGraph's `PostgresSaver`, or your own saver or factories, with one async saver per event loop.
+- **Waiting out rate limits:** a short rate limit or overload is waited out on the same model before falling back, as long as the touchpoint's `RetryPolicy` allows (`RETRY` setting, `touchpoint(retry=)`, `model(retry=)`, `agents.run(retry=)`). Daily quotas are never waited out.
+- `AllModelsFailed` when every model of a touchpoint fails, listing each model's error.
+- `agents.run` inside a running agent joins its request: same caller and limits, recorded in its run tree, streamed with it (`join=False` for a separate request).
 - Documentation site with Markdown versions of every page and `llms.txt`.
 
 ### Changed
@@ -21,6 +24,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - The package is split into a Django-free core (`llm_kit.core`) and Django adapters grouped by feature. URL includes moved to `llm_kit.transport.sse.urls`, `llm_kit.transport.api.urls` and `llm_kit.transport.ws.routing`.
 - With `REQUIRE_AUTH=False`, threads with no owner are staff-only; visitors use only their own threads.
 - `EXPOSE_ERRORS` controls error details in events (defaults to `DEBUG`).
+- `Touchpoint.model()` returns the chat model itself only when there is one candidate and nothing to wait for (`retry="never"`); otherwise a `TouchpointChatModel`.
+- Gemini's per-minute 429 ("exceeded your current quota … PerMinute") is classified as `rate_limit`, not `quota_exhausted`, so the circuit breaker no longer gives it the long quota cooldown.
 
 ### Removed
 

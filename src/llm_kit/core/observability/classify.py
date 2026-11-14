@@ -22,6 +22,11 @@ ERROR_CLASSES = (
 
 RETRYABLE = frozenset({"rate_limit", "timeout", "overloaded", "connection"})
 
+# Resets with the calendar: waiting won't help today. Checked first, because Gemini reports
+# daily and per-minute limits with the same 429 and the same "exceeded your current quota".
+_DAILY_HINTS = ("per day", "perday", "daily limit", "requests per day")
+# A window that closes on the clock (Gemini's quotaId, or a stated retry delay).
+_WINDOW_HINTS = ("per minute", "perminute", "per second", "persecond", "retrydelay", "retry_delay", "retry in ")
 _QUOTA_HINTS = (
     "insufficient_quota",
     "quota exceeded",
@@ -30,9 +35,6 @@ _QUOTA_HINTS = (
     "billing",
     "credit balance",
     "out of credits",
-    "per day",
-    "daily limit",
-    "requests per day",
 )
 _CONTEXT_HINTS = ("context length", "context_length", "maximum context", "too many tokens", "prompt is too long")
 _FILTER_HINTS = ("content filter", "content_filter", "safety", "blocked", "responsible ai")
@@ -53,10 +55,17 @@ def classify_error(exc: BaseException) -> str:
 
     if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
         return "cancelled"
+    errors = getattr(exc, "errors", None)
+    if type(exc).__name__ == "AllModelsFailed" and errors:
+        return classify_error(errors[0][1])
     name = type(exc).__name__.lower()
     text = f"{name} {exc}".lower()
     status = _status(exc)
 
+    if any(h in text for h in _DAILY_HINTS):
+        return "quota_exhausted"
+    if any(h in text for h in _WINDOW_HINTS) and (status == 429 or "429" in text or "resource_exhausted" in text):
+        return "rate_limit"
     if any(h in text for h in _QUOTA_HINTS):
         return "quota_exhausted"
     if (

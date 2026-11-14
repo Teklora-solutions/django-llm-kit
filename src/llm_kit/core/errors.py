@@ -32,3 +32,21 @@ class ModelNotAllowed(BadRequest):
     def __init__(self, message: str, reasons: list[str] | None = None) -> None:
         super().__init__(message)
         self.reasons = reasons or []
+
+
+class AllModelsFailed(LLMKitError):
+    """Every model a touchpoint tried failed. ``errors`` holds ``(model, exception)`` for each,
+    in the order tried; ``__cause__`` is the last one.
+
+    Its message lists every failure, and :func:`~llm_kit.core.observability.classify.classify_error`
+    classifies it by the primary model's error."""
+
+    def __init__(self, touchpoint: str, errors: list[tuple[str, BaseException]]) -> None:
+        self.touchpoint = touchpoint
+        self.errors = list(errors)
+        lines = "; ".join(f"{model}: {type(e).__name__}: {e}" for model, e in self.errors)
+        super().__init__(f"All {len(self.errors)} models for {touchpoint!r} failed. {lines}")
+
+    @property
+    def last(self) -> BaseException:
+        return self.errors[-1][1]

@@ -41,6 +41,7 @@ LLM_KIT = {
 | `LITELLM_ROUTER` | `{"routing_strategy": "simple-shuffle", "num_retries": 0}` | kwargs for the LiteLLM Router used with key pools |
 | `CREDENTIALS` | `None` | dotted path to `fn(provider)` returning a secret, a list of secrets, or `None`; asked before stored keys and env vars |
 | `ENCRYPTION_KEYS` | `None` | Fernet keys or passphrases for provider keys stored in the database, newest first |
+| `RETRY` | `{"attempts": 1, "max_wait": 6.0}` | waiting out a short rate limit on a model before falling back: waits per model and the longest wait in seconds. Per touchpoint or call: `retry=` ([details](../guides/touchpoints.md#rate-limits-and-fallbacks)) |
 | `CATALOGUE_SOURCES` | all | source names or dotted paths |
 | `CATALOGUE_MAX_AGE_HOURS` | `24` | when the catalogue counts as stale |
 
