@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Testing provider keys: one tiny call with the key alone, with the result stored on the key (migration 0015). Available as `POST llm/api/keys/<id>/test/`, `verify` when adding a key (a refused key isn't saved), a Test button in the keys template, and an admin action.
+
 - The example project has a `/settings/` page built from the settings templates.
 - Settings templates: `{% llm_kit_settings %}`, `{% llm_kit_keys %}` and `{% llm_kit_budgets %}` render settings, brought keys and budgets as forms. They post to new views under `llm/settings/` and can be overridden template by template.
 

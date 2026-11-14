@@ -39,7 +39,8 @@ def _run(request, action, done: str):
     except ValueError as e:
         _say(request, "error", str(e))
     else:
-        _say(request, "success", done)
+        if done:
+            _say(request, "success", done)
     return _back(request)
 
 
@@ -67,13 +68,12 @@ def save_setting(request):
 @login_required
 def add_key(request):
     p = request.POST
-    return _run(
-        request,
-        lambda owner: keys.add_key(
-            owner, p.get("scope", ""), p.get("provider", ""), p.get("key", ""), p.get("label", "")
-        ),
-        "Key added.",
-    )
+
+    def action(owner):
+        scope, provider, label = p.get("scope", ""), p.get("provider", ""), p.get("label", "")
+        keys.add_key(owner, scope, provider, p.get("key", ""), label, verify="verify" in p)
+
+    return _run(request, action, "Key added.")
 
 
 @require_POST
@@ -97,3 +97,15 @@ def save_budget(request):
             )
 
     return _run(request, action, "Budget saved." if "remove" not in request.POST else "Budget removed.")
+
+
+@require_POST
+@login_required
+def test_key(request, pk: int):
+    def action(owner):
+        result = keys.test_key(owner, request.POST.get("scope", ""), pk)
+        if result is None:
+            raise ValueError("No such key.")
+        _say(request, "success" if result["works"] else "error", result["message"])
+
+    return _run(request, action, "")

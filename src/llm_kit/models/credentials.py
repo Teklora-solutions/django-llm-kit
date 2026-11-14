@@ -20,6 +20,9 @@ class ProviderKey(models.Model):
     key_encrypted = models.TextField(editable=False)
     fingerprint = models.CharField(max_length=40, editable=False, help_text="Last 4 characters and a hash prefix")
     active = models.BooleanField(default=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True, editable=False)
+    last_check_ok = models.BooleanField(null=True, editable=False, help_text="Result of the last test call.")
+    last_check_error = models.CharField(max_length=255, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

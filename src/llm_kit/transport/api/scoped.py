@@ -114,7 +114,12 @@ class KeysView(APIView):
         owner = SettingsView._owner(self, request)
         try:
             row = keys.add_key(
-                owner, str(data.get("scope") or ""), data.get("provider", ""), data.get("key"), data.get("label", "")
+                owner,
+                str(data.get("scope") or ""),
+                data.get("provider", ""),
+                data.get("key"),
+                data.get("label", ""),
+                verify=bool(data.get("verify")),
             )
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=403)
@@ -197,3 +202,19 @@ class BudgetsView(APIView):
 
     def delete(self, request):
         return self._change(request, saving=False)
+
+
+class KeyTestView(APIView):
+    """``POST llm/api/keys/<id>/test/?scope=tenant`` tries the key with one tiny call and records the result."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, pk: int):
+        from llm_kit.scoped import keys
+
+        owner = SettingsView._owner(self, request)
+        try:
+            result = keys.test_key(owner, request.query_params.get("scope", "user"), pk)
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=403)
+        return Response(result) if result is not None else Response(status=404)
