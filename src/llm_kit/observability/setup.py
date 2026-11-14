@@ -32,9 +32,15 @@ def build_sinks(names) -> list:
 
 
 def configure() -> None:
+    from django.utils import timezone
+
+    from llm_kit.core.observability.spend import spend
     from llm_kit.monitoring.breaker import observe
+    from llm_kit.observability.budgets import spent_today
     from llm_kit.observability.prices import lookup
 
     enabled = conf.get("OBSERVABILITY")
     sinks = build_sinks(conf.get("RECORD_SINKS")) if enabled else []
-    recorder.configure(sinks, lookup, observers=[observe] if enabled else [])
+    recorder.configure(sinks, lookup, observers=[observe, spend.observe] if enabled else [])
+    # Touchpoint daily budgets: today's recorded spend, plus this process's calls since.
+    spend.configure(lambda name: spent_today(touchpoint=name), today=timezone.localdate)

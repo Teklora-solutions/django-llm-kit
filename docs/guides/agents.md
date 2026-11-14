@@ -145,6 +145,15 @@ Daily limits per user and per tenant come from recorded calls:
 LLM_KIT = {"DAILY_BUDGETS": {"user": 5, "tenant": 50}}   # USD since local midnight
 ```
 
+A touchpoint can have a daily limit too, across every call made through it, whoever makes them:
+
+```python
+digest = touchpoint("crm.digest", default="anthropic/claude-haiku-5-5", daily_budget=20)
+LLM_KIT = {"DAILY_BUDGETS": {"touchpoints": {"crm.digest": 10}}}   # sets or overrides it without a deploy
+```
+
+Once the touchpoint has reached its limit, `model()`, `complete()` and `embed()` raise `BudgetExceeded`, and an agent using it stops with `stopped="budget"`. The check runs before every call without querying the database each time. Each process keeps a running total: it reads today's recorded spend, adds its own calls as they are priced, and reads the database again every 30 seconds, which picks up other processes' calls. Under heavy parallel use, a touchpoint can go over its limit by what other processes spent since the last read.
+
 A request from a user or tenant that has reached its limit is refused before it starts. `agents.run` raises `BudgetExceeded`, the HTTP views answer 429, and the WebSocket consumer sends an `error` event. Calls are written in the background, so the day's total can miss the last few seconds of spend. `DAILY_BUDGETS` needs the `database` sink.
 
 ## History window

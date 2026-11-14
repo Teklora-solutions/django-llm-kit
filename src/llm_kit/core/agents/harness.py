@@ -182,7 +182,12 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         last_step=last and bool(tools or subagents),
     )
     if with_model:
-        llm = spec.get_touchpoint().model(config=config)
+        from llm_kit.core.errors import BudgetExceeded
+
+        try:
+            llm = spec.get_touchpoint().model(config=config)
+        except BudgetExceeded as e:
+            return {"messages": [_synthetic(f"Stopped: {e}")], "stopped": "budget"}
         offered = step.bound + ([find_tools_tool()] if deferred else [])
         offered += [delegate_tool(spec, subagents, env)] if subagents else []
         step.llm = llm.bind_tools(offered) if offered else llm

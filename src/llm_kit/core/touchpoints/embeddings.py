@@ -202,9 +202,11 @@ class _Call:
 
 
 def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) -> tuple[_Call, list[Any]]:
+    from llm_kit.core.observability.spend import check_daily_budget
     from llm_kit.core.touchpoints.env import default_env
     from llm_kit.core.touchpoints.retry import policy_for
 
+    check_daily_budget(tp)
     env = env or default_env()
     resolution = tp.resolve(requested, config=config_, env=env)
     if not fallbacks:
