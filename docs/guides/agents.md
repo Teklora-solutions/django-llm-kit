@@ -73,6 +73,8 @@ async for event in agents.stream(...):          # token / message / update / end
 
 Pass `join=False` to start a separate request. `agents.stream` always starts one.
 
+A touchpoint called there without a `config` (`tp.complete(...)`, or `tp.model().invoke(..., tp.run_config())`) joins the request too: the call is recorded in its run tree, counts towards its cost, and uses its `retry` policy. It doesn't use the request's model choice, which is for the agent's own touchpoint.
+
 ## The loop
 
 model → tools → model, until the model answers or reaches `max_steps`. On its last step the model is told to answer. Each step reads the declaration and admin overrides again, so a change in the admin applies to runs already in progress.
