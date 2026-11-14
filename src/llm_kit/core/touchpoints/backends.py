@@ -77,6 +77,8 @@ class TouchpointChatModel(RunnableWithFallbacks):
     retry: Any = None  # RetryPolicy
     refs: list[str] = []  # the model behind each candidate, for errors
     touchpoint: str = ""
+    limiter: Any = None  # ratelimit.Limiter: a slot per call, for candidates on the platform's keys
+    owners: list[str] = []  # whose keys each candidate uses (BYOK keys aren't your account's limits)
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> TouchpointChatModel:
         return self._map(lambda m: m.bind_tools(tools, **kwargs))
@@ -92,6 +94,8 @@ class TouchpointChatModel(RunnableWithFallbacks):
             retry=self.retry,
             refs=self.refs,
             touchpoint=self.touchpoint,
+            limiter=self.limiter,
+            owners=self.owners,
         )
 
     @property
@@ -118,6 +122,57 @@ class TouchpointChatModel(RunnableWithFallbacks):
             )
         return delay
 
+    # -------------------------------------------------------------- rate limits
+
+    def _limited(self, index: int) -> bool:
+        if self.limiter is None:
+            return False
+        owner = self.owners[index] if index < len(self.owners) else "platform"
+        return owner in ("", "platform")
+
+    def _limit_wait(self) -> float:
+        policy = self.retry or RetryPolicy.NEVER
+        return policy.max_wait if policy.waits else 0.0
+
+    def _refused(self, index: int, e: BaseException) -> BaseException:
+        logger.info(
+            "%s: no slot for %s (%s); trying the next model", self.touchpoint or "touchpoint", self._ref(index), e
+        )
+        return e
+
+    def _slot(self, index: int) -> BaseException | None:
+        """None when the call may go ahead; the ``RateLimited`` refusal otherwise."""
+        if not self._limited(index):
+            return None
+        from llm_kit.core.touchpoints.ratelimit import RateLimited
+
+        try:
+            self.limiter.acquire(self._ref(index), self._limit_wait())
+        except RateLimited as e:
+            return self._refused(index, e)
+        return None
+
+    async def _aslot(self, index: int) -> BaseException | None:
+        if not self._limited(index):
+            return None
+        from llm_kit.core.touchpoints.ratelimit import RateLimited
+
+        try:
+            await self.limiter.aacquire(self._ref(index), self._limit_wait())
+        except RateLimited as e:
+            return self._refused(index, e)
+        return None
+
+    def _count(self, index: int, output: Any) -> None:
+        if not self._limited(index) or output is None:
+            return
+        from llm_kit.core.touchpoints.ratelimit import tokens_of
+
+        try:
+            self.limiter.record(self._ref(index), tokens_of(output))
+        except Exception:  # counting must never break an answer
+            logger.warning("Could not count tokens for %s", self._ref(index), exc_info=True)
+
     def _failure(self, errors: list[tuple[str, BaseException]]) -> BaseException:
         if len(errors) == 1:
             return errors[0][1]
@@ -137,6 +192,9 @@ class TouchpointChatModel(RunnableWithFallbacks):
         for index, runnable in enumerate(self.runnables):
             attempt = 0
             while True:
+                if (refused := self._slot(index)) is not None:
+                    errors.append((self._ref(index), refused))
+                    break
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
@@ -152,6 +210,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                     run_manager.on_chain_error(e)
                     raise
                 else:
+                    self._count(index, output)
                     run_manager.on_chain_end(output)
                     return output
         failure = self._failure(errors)
@@ -165,6 +224,9 @@ class TouchpointChatModel(RunnableWithFallbacks):
         for index, runnable in enumerate(self.runnables):
             attempt = 0
             while True:
+                if (refused := await self._aslot(index)) is not None:
+                    errors.append((self._ref(index), refused))
+                    break
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
@@ -181,6 +243,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                     await run_manager.on_chain_error(e)
                     raise
                 else:
+                    self._count(index, output)
                     await run_manager.on_chain_end(output)
                     return output
         failure = self._failure(errors)
@@ -198,12 +261,15 @@ class TouchpointChatModel(RunnableWithFallbacks):
         for index, runnable in enumerate(self.runnables):
             attempt = 0
             while stream is None:
+                if (refused := self._slot(index)) is not None:
+                    errors.append((self._ref(index), refused))
+                    break
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
                         candidate = context.run(runnable.stream, input, child, **kwargs)
                         chunk = context.run(next, candidate)
-                    stream = candidate
+                    stream, streamed = candidate, index
                 except self.exceptions_to_handle as e:
                     delay = self._wait_for(e, attempt, index)
                     if delay is None:
@@ -232,6 +298,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
         except BaseException as e:
             run_manager.on_chain_error(e)
             raise
+        self._count(streamed, output)
         run_manager.on_chain_end(output)
 
     async def astream(self, input: Any, config: RunnableConfig | None = None, **kwargs: Any) -> AsyncIterator[Any]:
@@ -242,12 +309,15 @@ class TouchpointChatModel(RunnableWithFallbacks):
         for index, runnable in enumerate(self.runnables):
             attempt = 0
             while stream is None:
+                if (refused := await self._aslot(index)) is not None:
+                    errors.append((self._ref(index), refused))
+                    break
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
                         candidate = runnable.astream(input, child, **kwargs)
                         chunk = await coro_with_context(anext(candidate), context)
-                    stream = candidate
+                    stream, streamed = candidate, index
                 except self.exceptions_to_handle as e:
                     delay = self._wait_for(e, attempt, index)
                     if delay is None:
@@ -276,6 +346,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
         except BaseException as e:
             await run_manager.on_chain_error(e)
             raise
+        self._count(streamed, output)
         await run_manager.on_chain_end(output)
 
     # One call per input through the loop above, instead of RunnableWithFallbacks' batching.
@@ -379,7 +450,9 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
     from llm_kit.core.observability.handler import get_handler
 
     handler = get_handler()
-    models, refs = [], []
+    limiter_for = getattr(env, "rate_limiter", None)
+    limiter = limiter_for() if callable(limiter_for) else None
+    models, refs, owners = [], [], []
     for index, ref in enumerate(resolution.candidates):
         for owner, keys in key_sets(env, ref, tp):  # one attempt per owner (BYOK: theirs, then yours)
             model = factory(ref, dict(resolution.params), keys)
@@ -396,9 +469,10 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
                 model.callbacks = [*existing, handler]
             models.append(model)
             refs.append(ref)
+            owners.append(owner)
     if not models:
         raise no_key(tp, resolution.candidates)
-    if len(models) == 1 and not (retry and retry.waits):
+    if len(models) == 1 and not (retry and retry.waits) and limiter is None:
         return models[0]
     return TouchpointChatModel(
         runnable=models[0],
@@ -406,6 +480,8 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
         retry=retry or RetryPolicy.NEVER,
         refs=refs,
         touchpoint=tp.name,
+        limiter=limiter,
+        owners=owners,
     )
 
 

@@ -44,6 +44,12 @@ class DjangoEnv:
 
         return ScopedEnv(self, caller)
 
+    def rate_limiter(self):
+        """The shared per-model rate limiter, or None when no limits are set."""
+        from llm_kit import ratelimits
+
+        return ratelimits.limiter()
+
     def circuit_open(self, provider: str) -> bool:
         from llm_kit.monitoring.breaker import breaker
 

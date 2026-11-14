@@ -108,6 +108,17 @@ class ReadinessView(_MonitoringView):
         return Response(monitoring.readiness())
 
 
+class RateLimitsView(_MonitoringView):
+    """Use against each model's rate limits right now (requests and tokens this minute, requests today)."""
+
+    def get(self, request):
+        from llm_kit import ratelimits
+
+        if request.query_params:
+            raise ValidationError({"detail": "This endpoint takes no parameters."})
+        return Response({"models": ratelimits.usage()})
+
+
 class AlertsView(_MonitoringView):
     def get(self, request):
         from llm_kit.models import AlertEvent, AlertRule
