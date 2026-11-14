@@ -69,6 +69,12 @@ DEFAULTS: dict[str, Any] = {
     "AGENT_MAX_DEPTH": 2,
     "AGENT_MAX_DELEGATIONS": 8,
     "AGENT_TIMEOUT": 300,
+    # Tools loaded on demand (find_tools): agents with more tools than this defer them unless
+    # they declare defer_tools; how many found tools stay bound (most recent first); and an
+    # embedding touchpoint that lets find_tools search by meaning as well as by words.
+    "DEFER_TOOLS_ABOVE": 20,
+    "MAX_LOADED_TOOLS": 15,
+    "TOOL_SEARCH_TOUCHPOINT": None,
     # USD one request (an agent and its subagents) may spend before its agents stop starting
     # model calls; None = no limit. Per run: agents.run(..., budget=0.5).
     "AGENT_BUDGET": None,

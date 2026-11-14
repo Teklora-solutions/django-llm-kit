@@ -6,11 +6,17 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Many tools: agents with more than `DEFER_TOOLS_ABOVE` tools load them on demand. The prompt gets a category overview instead of every schema. `find_tools` ranks by words, with rarer words counting more, takes a `category`, and can search by meaning through `TOOL_SEARCH_TOUCHPOINT`. Only the `MAX_LOADED_TOOLS` most recently found tools stay bound.
+
 - Embeddings: `touchpoint.embed()` / `aembed()` with the same resolution, keys, fallbacks, retry waits, circuit breaker and recording as chat calls. Inputs may be media parts for backends that take them. `EMBEDDING_BACKEND` setting; `LLMCall.kind` (`chat` or `embedding`, migration 0011).
 
 - A touchpoint called inside a running agent without a `config` (`complete()`, `acomplete()`, `model()` with `run_config()`) joins that agent's request: recorded in its run tree, counted in its totals, and using its `retry` policy.
 - `TENANT_RESOLVER` may take `request` and `scope`: the HTTP views pass the request and the WebSocket consumer the Channels scope, so a user in several tenants can pick one per request (a header, say). Raising `PermissionDenied` refuses the request (403, or WebSocket close 4403).
 - Budgets: `AGENT_BUDGET` / `agents.run(budget=)` cap what a request may spend (its agents stop with `stopped="budget"`), and `DAILY_BUDGETS` refuses requests from a user or tenant over its daily spend (`BudgetExceeded`, 429).
+
+### Changed
+
+- `defer_tools` defaults to `None` (defer when there are more than `DEFER_TOOLS_ABOVE` tools) instead of `False`. Pass `defer_tools=False` to keep every tool bound.
 
 ## [0.2.0] - 2026-11-14
 

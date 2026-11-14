@@ -85,7 +85,25 @@ model → tools → model, until the model answers or reaches `max_steps`. On it
 - The tool node refuses any call outside the agent's own set, so a parent's tools never reach a subagent.
 - `tools.select(names=…, categories=…, kinds=…)` picks registered tools lazily, per caller.
 - **Public tools:** a tool registered with `permission=tools.PUBLIC` is offered to anonymous visitors and to runs with no user (a Celery task). Use it only for tools that read public data. Tools generated from your models can't be public.
-- **Loading tools on demand:** `defer_tools=True, essential=[...]` binds only the essential tools plus `find_tools`. Tools the model finds are bound from the next step and stay loaded in the thread. Deferral keeps the prompt small; it does not change what the agent may access.
+- **Loading tools on demand:** see [many tools](#many-tools) below.
+
+### Many tools
+
+Every bound tool's name, description and argument schema goes into every model call. With dozens of tools that crowds the context and makes the model choose worse. So an agent that can use more than `DEFER_TOOLS_ABOVE` tools (default 20) **defers** them:
+
+- The model gets its `essential` tools, a `find_tools` tool, and a one-line overview of the rest by category, such as `34 more tools are available (billing (12), crm (9), reports (8), other (5))`.
+- `find_tools(query, category=None)` searches the deferred tools and loads the best matches, which the model can call from its next step. The search covers names, categories, descriptions and argument names, and words that few tools share count most. With a `category` and no query, it loads that category's first tools. When nothing matches, the reply lists the categories again.
+- Found tools stay loaded for the thread. Only the `MAX_LOADED_TOOLS` most recently found stay bound (default 15), so a long conversation doesn't build the context back up.
+
+```python
+agent("ops.assistant", ..., tools=tools.select(), essential=["whoami"])   # deferred once over the threshold
+agent("crm.writer", ..., defer_tools=True)                                # always deferred
+agent("crm.quick", ..., defer_tools=False)                                # never deferred
+```
+
+To search by meaning as well as by words, so that "money customers owe" finds `find_invoices`, point `TOOL_SEARCH_TOUCHPOINT` at an [embedding touchpoint](touchpoints.md#embeddings). Each tool is embedded once per process, and each search embeds the query. If the embedding call fails, the search falls back to words.
+
+Deferral keeps the prompt small. It doesn't change which tools the agent may use.
 - **Long tool results:** `tool_result_chars=12000` cuts each tool result to that many characters, with a note saying how much was left out, so one fetched page can't fill the context window.
 
 ## Handing work over
