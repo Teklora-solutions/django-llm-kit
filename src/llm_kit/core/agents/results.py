@@ -15,7 +15,7 @@ class AgentResult:
     output: Any = None  # an instance of the agent's ``output`` schema, if it has one
     messages: list = field(default_factory=list)  # this turn's messages
     steps: int = 0  # model calls this turn
-    stopped: str = "done"  # done | max_steps | timeout | paused
+    stopped: str = "done"  # done | max_steps | timeout | budget | paused
     thread_id: str = ""
     input_tokens: int = 0
     output_tokens: int = 0

@@ -182,6 +182,7 @@ class ObservabilityHandler(BaseCallbackHandler):
         with self._lock:
             self._calls[run_id] = {
                 "rec": rec,
+                "request": str(meta.get("llm_kit_request") or ""),  # limits.REQUEST_KEY
                 "t0": time.perf_counter(),
                 "first": None,
                 "prompt_text": _text_of(payload),
@@ -234,6 +235,8 @@ class ObservabilityHandler(BaseCallbackHandler):
                 "tool_calls": getattr(msg, "tool_calls", None),
             }
         self._count(rec)
+        if state.get("request"):  # add the call to its request's spend (for AGENT_BUDGET)
+            _count_towards_request(state["request"], rec)
         recorder.emit(rec)
 
     def on_llm_error(self, error, *, run_id, parent_run_id=None, **kwargs):
@@ -322,3 +325,15 @@ handler = ObservabilityHandler()
 def get_handler() -> ObservabilityHandler | None:
     """The shared handler, or None when recording is switched off (``OBSERVABILITY: False``)."""
     return handler if config.get("OBSERVABILITY") else None
+
+
+def _count_towards_request(request_id: str, rec: CallRecord) -> None:
+    """Add a finished call's tokens to its request's tree, which prices them for its budget."""
+    from llm_kit.core.agents.limits import live_tree
+
+    tree = live_tree(request_id)
+    if tree is not None:
+        tree.add_usage(
+            rec.model or rec.served_model,
+            (rec.input_tokens, rec.output_tokens, rec.cache_read_tokens, rec.cache_write_tokens, rec.reasoning_tokens),
+        )

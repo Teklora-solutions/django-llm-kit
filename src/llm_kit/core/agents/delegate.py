@@ -20,7 +20,7 @@ from langchain_core.tools import InjectedToolCallId, StructuredTool
 from pydantic import Field, create_model
 
 from llm_kit.core import config as settings
-from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree, is_ephemeral, stack_of, tree_of
+from llm_kit.core.agents.limits import REQUEST_KEY, STACK_KEY, TREE_KEY, Tree, is_ephemeral, stack_of, tree_of
 from llm_kit.core.agents.results import AgentResult, from_state
 from llm_kit.core.agents.spec import AgentSpec, UnknownAgent, get_agent
 from llm_kit.core.errors import LLMKitError
@@ -90,6 +90,7 @@ def child_config(config, spec: AgentSpec, thread_id: str) -> dict[str, Any]:
         llm_kit_parent_agent=stack[-1] if stack else "",
         llm_kit_depth=len(stack),
     )
+    metadata[REQUEST_KEY] = configurable[TREE_KEY].id
     child: dict[str, Any] = {
         "configurable": configurable,
         "metadata": metadata,

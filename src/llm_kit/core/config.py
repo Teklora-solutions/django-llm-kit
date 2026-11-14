@@ -66,6 +66,12 @@ DEFAULTS: dict[str, Any] = {
     "AGENT_MAX_DEPTH": 2,
     "AGENT_MAX_DELEGATIONS": 8,
     "AGENT_TIMEOUT": 300,
+    # USD one request (an agent and its subagents) may spend before its agents stop starting
+    # model calls; None = no limit. Per run: agents.run(..., budget=0.5).
+    "AGENT_BUDGET": None,
+    # USD per day, from recorded calls: {"user": 5, "tenant": 50}. A request whose user or
+    # tenant is over is refused before it starts.
+    "DAILY_BUDGETS": {},
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

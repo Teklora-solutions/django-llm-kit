@@ -48,11 +48,13 @@ def build_config(thread, payload: dict[str, Any], user=None, *, owner=None) -> d
 
     ``owner`` (from ``access.owner_from_request`` / ``owner_from_scope``) supplies the user and
     the tenant already resolved for this request; otherwise ``TENANT_RESOLVER(user)``."""
+    from llm_kit.observability.budgets import check_daily
     from llm_kit.tools.caller import _UNSET, CONFIG_KEY, caller_for
 
     if owner is not None:
         user = owner.user
     caller = caller_for(user, _UNSET if owner is None else owner.tenant)
+    check_daily(caller)  # BudgetExceeded: the views answer 429
     metadata = {"llm_kit_graph": thread.graph}
     if caller.is_authenticated:
         metadata["user_id"] = str(caller.user_id)

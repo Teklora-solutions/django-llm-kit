@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage
 
 from llm_kit.core.agents.env import AgentEnv, default_env
-from llm_kit.core.agents.limits import STACK_KEY, TREE_KEY, Tree, is_ephemeral
+from llm_kit.core.agents.limits import REQUEST_KEY, STACK_KEY, TREE_KEY, Tree, is_ephemeral
 from llm_kit.core.agents.results import AgentResult, from_state
 from llm_kit.core.agents.spec import AgentSpec, get_agent
 
@@ -33,6 +33,7 @@ def root_config(spec: AgentSpec, config: dict[str, Any] | None = None, thread_id
         **(config.get("metadata") or {}),
         "llm_kit_agent": spec.name,
         "llm_kit_depth": len(configurable[STACK_KEY]) - 1,
+        REQUEST_KEY: configurable[TREE_KEY].id,
     }
     config.setdefault("recursion_limit", 2 * spec.max_steps + 8)
     return config

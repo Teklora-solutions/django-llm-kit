@@ -23,6 +23,7 @@ import asyncio
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 
+from llm_kit.core.errors import BudgetExceeded
 from llm_kit.models import Thread
 from llm_kit.runtime import access, runs
 from llm_kit.runtime.graphs import UnknownGraph, default_graph_name, get_graph
@@ -110,7 +111,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             graph_input = runs.build_input(payload)
             # Sync: TENANT_RESOLVER may query the database.
             config = await database_sync_to_async(self._config)(payload)
-        except (UnknownGraph, runs.BadRequest, access.NotAllowed) as e:
+        except (UnknownGraph, runs.BadRequest, access.NotAllowed, BudgetExceeded) as e:
             await self.send_event("error", {"message": str(e)})
             return
         if created:

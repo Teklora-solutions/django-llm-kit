@@ -102,8 +102,32 @@ model → tools → model, until the model answers or reaches `max_steps`. On it
 | `AGENT_MAX_DEPTH` | `2` | how deep subagents may nest (`0`: no delegation) |
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
+| `AGENT_BUDGET` | `None` | USD a request may spend before its agents start no new model call |
 
 No agent can hand work to itself or to an agent above it. The timeout is cooperative: it is checked before each model call and hand-off, and doesn't kill a call in progress.
+
+## Budgets
+
+A request keeps a running total of what its calls cost, its subagents' included, as each call ends. Before each step, an agent checks it against the request's budget. Once the budget is reached, the agent makes no more model calls and runs no more tools, and the run ends with `stopped="budget"`:
+
+```python
+result = agents.run("crm.researcher", task, user=user, budget=0.50)   # USD; default AGENT_BUDGET
+if result.stopped == "budget":
+    ...
+```
+
+- A call already under way finishes. A request can go over its budget by about one call.
+- Prices come from the [catalogue](catalogue.md). A model with no known price adds nothing.
+- The total needs recording on (`OBSERVABILITY`, the default). It doesn't need a sink, so `RECORD_SINKS: []` is fine.
+- A run inside another agent's request shares that request's budget. Passing `budget=` there raises `ConfigError`.
+
+Daily limits per user and per tenant come from recorded calls:
+
+```python
+LLM_KIT = {"DAILY_BUDGETS": {"user": 5, "tenant": 50}}   # USD since local midnight
+```
+
+A request from a user or tenant that has reached its limit is refused before it starts. `agents.run` raises `BudgetExceeded`, the HTTP views answer 429, and the WebSocket consumer sends an `error` event. Calls are written in the background, so the day's total can miss the last few seconds of spend. `DAILY_BUDGETS` needs the `database` sink.
 
 ## History window
 
