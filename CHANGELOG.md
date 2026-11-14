@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Daily budgets per touchpoint: `touchpoint(..., daily_budget=)` or `DAILY_BUDGETS["touchpoints"]`. Checked before every call against a running total kept in memory and re-read from recorded calls every 30 s. Calls over the limit raise `BudgetExceeded`, and agents stop with `stopped="budget"`.
+
 - Many tools: agents with more than `DEFER_TOOLS_ABOVE` tools load them on demand. The prompt gets a category overview instead of every schema. `find_tools` ranks by words, with rarer words counting more, takes a `category`, and can search by meaning through `TOOL_SEARCH_TOUCHPOINT`. Only the `MAX_LOADED_TOOLS` most recently found tools stay bound.
 
 - Embeddings: `touchpoint.embed()` / `aembed()` with the same resolution, keys, fallbacks, retry waits, circuit breaker and recording as chat calls. Inputs may be media parts for backends that take them. `EMBEDDING_BACKEND` setting; `LLMCall.kind` (`chat` or `embedding`, migration 0011).

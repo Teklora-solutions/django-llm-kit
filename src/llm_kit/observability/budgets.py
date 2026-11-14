@@ -1,10 +1,12 @@
-"""Daily spend limits per user and tenant (``LLM_KIT["DAILY_BUDGETS"]``), from recorded calls.
+"""Daily spend limits per user, tenant and touchpoint (``LLM_KIT["DAILY_BUDGETS"]``), from recorded calls.
 
     LLM_KIT = {"DAILY_BUDGETS": {"user": 5, "tenant": 50}}   # USD since local midnight
+    LLM_KIT = {"DAILY_BUDGETS": {"touchpoints": {"crm.digest": 20}}}   # per touchpoint
 
-Checked when a request starts (llm-kit's views, ``agents.run``). Calls are recorded in the
-background, so the total can trail the last few seconds of spend; a request already running
-is limited by ``AGENT_BUDGET`` instead.
+Users and tenants are checked when a request starts (llm-kit's views, ``agents.run``);
+touchpoints before each call, from a running total (``llm_kit.core.observability.spend``).
+Calls are recorded in the background, so totals can trail the last few seconds of spend;
+a request already running is limited by ``AGENT_BUDGET`` instead.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from llm_kit import conf
 from llm_kit.core.errors import BudgetExceeded
 
 SCOPES = ("user", "tenant")
+KEYS = (*SCOPES, "touchpoints")  # touchpoints: checked on each call (llm_kit.core.observability.spend)
 
 
 def spent_today(**where: Any) -> Decimal:
@@ -35,11 +38,11 @@ def check_daily(caller) -> None:
     limits = conf.get("DAILY_BUDGETS") or {}
     if not limits or caller is None:
         return
-    unknown = set(limits) - set(SCOPES)
+    unknown = set(limits) - set(KEYS)
     if unknown:
         from llm_kit.core.errors import ConfigError
 
-        raise ConfigError(f"DAILY_BUDGETS: unknown key(s) {sorted(unknown)}; use {', '.join(SCOPES)}.")
+        raise ConfigError(f"DAILY_BUDGETS: unknown key(s) {sorted(unknown)}; use {', '.join(KEYS)}.")
     ids = {"user": caller.user_id, "tenant": caller.tenant_id}
     for scope in SCOPES:
         limit, who = limits.get(scope), ids[scope]

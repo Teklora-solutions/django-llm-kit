@@ -57,7 +57,7 @@ LLM_KIT = {
 | `MAX_LOADED_TOOLS` | `15` | how many found tools stay bound, most recently found first |
 | `TOOL_SEARCH_TOUCHPOINT` | `None` | an embedding touchpoint; `find_tools` then searches by meaning as well as by words |
 | `AGENT_BUDGET` | `None` | USD a request may spend; then its agents stop with `stopped="budget"` (per run: `agents.run(budget=)`; [budgets](../guides/agents.md#budgets)) |
-| `DAILY_BUDGETS` | `{}` | USD per day for `"user"` and `"tenant"`, from recorded calls; a request over it is refused (429) |
+| `DAILY_BUDGETS` | `{}` | USD per day for `"user"` and `"tenant"` (a request over it is refused, 429), and `"touchpoints": {name: USD}` (calls over it raise `BudgetExceeded`); from recorded calls |
 
 ## Recording and monitoring
 

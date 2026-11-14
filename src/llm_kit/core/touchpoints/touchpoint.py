@@ -64,6 +64,7 @@ class Touchpoint:
     backend: str | None = None  # None = LLM_KIT["MODEL_BACKEND"]
     capture: bool | None = None  # store prompts/responses; None = LLM_KIT["CAPTURE_CONTENT"]
     retry: RetryPolicy | None = None  # waits before falling back; None = LLM_KIT["RETRY"]
+    daily_budget: Any = None  # USD per day across all its calls; None = no limit
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -103,8 +104,10 @@ class Touchpoint:
         across runs shouldn't come from whichever model answered); it still waits per ``retry``.
         The returned runnable supports ``invoke``/``stream``/``bind_tools``/``with_structured_output``.
         """
+        from llm_kit.core.observability.spend import check_daily_budget
         from llm_kit.core.touchpoints.backends import build_for
 
+        check_daily_budget(self)  # BudgetExceeded once today's spend reaches daily_budget
         resolution = self.resolve(requested, config=config, env=env)
         if not fallbacks:
             resolution.fallbacks = []
@@ -283,8 +286,13 @@ def touchpoint(
     backend: str | None = None,
     capture: bool | None = None,
     retry: RetryPolicy | dict | str | None = None,
+    daily_budget: Any = None,
 ) -> Touchpoint:
-    """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads)."""
+    """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads).
+
+    ``daily_budget`` (USD) caps what all its calls may spend in a day; past it, ``model()``,
+    ``complete()`` and ``embed()`` raise ``BudgetExceeded`` (``DAILY_BUDGETS["touchpoints"]``
+    sets or overrides it without a deploy)."""
     tp = Touchpoint(
         name=name,
         default=default,
@@ -296,6 +304,7 @@ def touchpoint(
         backend=backend,
         capture=capture,
         retry=retry,
+        daily_budget=daily_budget,
     )
     with _lock:
         _registry[name] = tp
