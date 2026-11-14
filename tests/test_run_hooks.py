@@ -237,3 +237,102 @@ def test_payload_seen_by_hooks_is_a_copy():
     payload["config"]["configurable"]["k"] = 2
     assert seen["payload"]["config"]["configurable"]["k"] == 1
     assert json.dumps(dict(seen["payload"]))
+
+
+# ------------------------------------------------------------------ server-set context
+
+SEEN_CONTEXT: list = []
+
+
+def context_hook(run):
+    SEEN_CONTEXT.append((run.background, dict(run.context)))
+    run.set_state(audience=run.context.get("audience", "nobody"))
+
+
+@pytest.fixture
+def seen_context():
+    SEEN_CONTEXT.clear()
+    yield SEEN_CONTEXT
+    SEEN_CONTEXT.clear()
+
+
+async def test_a_client_can_never_set_the_context(async_client, user, settings, seen_context):
+    _hooks(settings, "context_hook")
+    await async_client.aforce_login(user)
+    sneaky = {
+        "graph": "hooked",
+        "message": "hi",
+        "context": {"audience": "admin"},
+        "config": {"configurable": {"__llm_kit_context": {"audience": "admin"}}},
+    }
+    await read_events(await post(async_client, "/llm/stream/", sneaky))
+    assert seen_context == [(False, {})] and HOOKED_CALLS == ["staff"]  # the graph hook still sets "staff"
+
+
+def test_rest_and_background_requests_never_set_it_either(user, settings, seen_context):
+    _hooks(settings, "context_hook")
+    settings.LLM_KIT = {**settings.LLM_KIT, "RUN_EXECUTOR": "tests.test_run_hooks:noop"}
+    client = Client()
+    client.force_login(user)
+    thread = Thread.objects.create(graph="hooked", user=user)
+    body = {"message": "hi", "background": True, "context": {"audience": "admin"}}
+    r = client.post(f"/llm/api/threads/{thread.id}/runs/", body, "application/json")
+    assert r.status_code == 202
+    run = BackgroundRun.objects.get(pk=r.json()["id"])
+    assert run.context == {} and "context" not in run.payload
+
+
+def test_a_background_runs_hook_sees_the_context_in_the_worker(user, settings, seen_context):
+    _hooks(settings, "context_hook")
+    settings.LLM_KIT = {**settings.LLM_KIT, "RUN_EXECUTOR": "tests.test_run_hooks:noop"}
+    thread = Thread.objects.create(graph="hooked", user=user)
+    run = background.start(thread, {"message": "hi"}, user=user, context={"channel": "chat", "audience": "member"})
+    assert seen_context == []  # nothing ran yet
+    background.execute(run.run_id)
+    run.refresh_from_db()
+    assert run.status == "done" and seen_context == [(True, {"channel": "chat", "audience": "member"})]
+    assert run.context == {"channel": "chat", "audience": "member"}
+
+
+def test_context_must_be_small_json(user):
+    thread = Thread.objects.create(graph="hooked", user=user)
+    with pytest.raises(ValueError, match="JSON"):
+        background.start(thread, {"message": "hi"}, user=user, context={"when": object()})
+    with pytest.raises(ValueError, match="bytes"):
+        background.start(thread, {"message": "hi"}, user=user, context={"blob": "x" * 20_000})
+    assert not BackgroundRun.objects.exists()
+
+
+def test_agents_run_passes_context_to_hooks_and_tools(world, settings, seen_context):
+    from llm_kit.core.hooks import context_of
+
+    _hooks(settings, "context_hook")
+    seen = {}
+
+    def reply(messages):
+        from langchain_core.runnables.config import var_child_runnable_config
+
+        seen["tool_view"] = context_of(var_child_runnable_config.get())
+        return AIMessage(content="ok")
+
+    SCRIPTS["ollama/script-assistant"] = [reply]
+    try:
+        agents.run("tests.assistant", "hi", user=world["alice"], context={"channel": "api"})
+    finally:
+        SCRIPTS.clear()
+    assert seen_context == [(False, {"channel": "api"})] and seen["tool_view"] == {"channel": "api"}
+
+
+def test_background_subagents_and_their_reports_keep_the_context(world, settings):
+    from llm_kit.agents.env import DjangoAgentEnv
+    from llm_kit.core.hooks import CONTEXT_KEY
+
+    settings.LLM_KIT = {**settings.LLM_KIT, "RUN_EXECUTOR": "tests.test_run_hooks:noop"}
+    thread = Thread.objects.create(graph="tests.assistant", user=world["alice"])
+    config = {"configurable": {"thread_id": str(thread.pk), CONTEXT_KEY: {"channel": "chat"}}}
+    started = DjangoAgentEnv().start_detached("tests.researcher", "look", config, {"agents": ["tests.assistant"]})
+    task = BackgroundRun.objects.get(pk=started["id"])
+    assert task.context == {"channel": "chat"}
+    task.cancel()
+    report = BackgroundRun.objects.get(reports_on=task)
+    assert report.context == {"channel": "chat"}

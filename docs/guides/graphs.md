@@ -87,7 +87,22 @@ A hook is a plain function (it may query the database) called with a `RunSetup` 
 - **add callbacks** with `run.add_callback(cb)`.
 - **wrap the run** by returning context managers (or calling `run.enter(cm)`). They are entered around the whole run, in order, in the task that runs it, and exited when it ends however it ends. This is the place to set ContextVars your tools read, or write a row in `finally`.
 
-It sees `run.graph`, `run.owner` (`user`, `tenant`), `run.thread`, `run.payload` (a read-only copy of what the client sent) and `run.background`.
+It sees `run.graph`, `run.owner` (`user`, `tenant`), `run.thread`, `run.payload` (a read-only copy of what the client sent), `run.background` and `run.context`.
+
+### Server-set context
+
+The payload is shaped by the client. Facts only your server knows go in `context` instead: the channel a message came in on, an API key's narrowed permissions, attachment ids you've already checked against the caller. Your own views and tasks pass it:
+
+```python
+background.start(thread, {"message": text}, user=user, context={"channel": "chat", "attachments": [42]})
+agents.run("support.assistant", text, user=user, context={"channel": "api", "scopes": ["orders:read"]})
+agents.start(..., context={...})
+setup = runtime.runs.prepare(thread, payload, owner=owner, context={...})   # if you run graphs yourself
+```
+
+Hooks get it read-only as `run.context`. Tools can read it with `llm_kit.core.hooks.context_of(config)`. No transport ever sets it from a request: a `"context"` key in a client's body is ignored, and `__llm_kit_context` in its `configurable` is dropped like every `__` key. So it is empty for runs the built-in views start, unless your own view passes it.
+
+It must be a small JSON object (16 KB at most), because it is saved with a background run for the worker. A background subagent inherits its parent run's context, and so does the report of its answer.
 
 For a background run, the hooks run in the worker, from the saved payload and owner, not when the run is queued. A permission change between queueing and running is seen. Nothing the hooks return is stored.
 

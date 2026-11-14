@@ -178,13 +178,13 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
     return _config(name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **extra)[0]
 
 
-def _hooks(name: str, task: str, cfg: dict, thread, nested: bool):
+def _hooks(name: str, task: str, cfg: dict, thread, nested: bool, context=None):
     """The run hooks for a run started from code (a run inside another's request already had them)."""
     if nested:
         return None
     from langchain_core.messages import HumanMessage
 
-    from llm_kit.core.hooks import prepare
+    from llm_kit.core.hooks import check_context, prepare
     from llm_kit.runtime import access
     from llm_kit.runtime.graphs import prepare_hook
     from llm_kit.tools.caller import caller_from
@@ -199,6 +199,7 @@ def _hooks(name: str, task: str, cfg: dict, thread, nested: bool):
         owner=owner,
         thread=thread,
         graph_hook=prepare_hook(name),
+        context=check_context(context),
     )
 
 
@@ -228,12 +229,16 @@ def run(
     join: bool = True,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AgentResult:
     """Run agent ``name`` on ``task`` to the end. ``thread`` or ``thread_id`` continues a conversation.
 
     Without either, the run is throwaway: its saved state (and its subagents') is deleted when it
     ends. The result, and the recorded calls and runs, are kept.
+
+    ``context``: facts only your server knows, for the run hooks (``run.context``): a small JSON
+    object. A run inside another agent's request has that request's context.
     """
     cfg, nested = _config(
         name,
@@ -247,7 +252,7 @@ def run(
         **config,
     )
     try:
-        setup = _hooks(name, task, cfg, thread, nested)
+        setup = _hooks(name, task, cfg, thread, nested, context)
         from llm_kit.core.hooks import entered
 
         with _detached(nested), entered(setup.contexts if setup else ()):
@@ -271,6 +276,7 @@ async def arun(
     join: bool = True,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AgentResult:
     cfg, nested = await sync_to_async(_config, thread_sensitive=True)(
@@ -285,7 +291,7 @@ async def arun(
         **config,
     )
     try:
-        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, nested)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, nested, context)
         from llm_kit.core.hooks import aentered
 
         async with aentered(setup.contexts if setup else ()):
@@ -309,6 +315,7 @@ async def stream(
     thread=None,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AsyncIterator[dict]:
     """llm-kit events (``token``, ``message``, ``update``, ``end``, ``error``) as the agent works.
@@ -330,7 +337,7 @@ async def stream(
     )
     try:
         graph = get_graph(name, ephemeral=thread is None and thread_id is None)
-        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, False)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, False, context)
         # Only touch the context when there is a parent to hide (the generator may be resumed elsewhere).
         with _detached(running_parent() is None):
             async for event in astream_run(graph, setup.input, setup.config, setup.contexts):
@@ -352,6 +359,7 @@ def start(
     thread=None,
     model: str | None = None,
     queue: bool | None = None,
+    context: dict | None = None,
 ):
     """Start agent ``name`` on ``task`` in the background and return the ``BackgroundRun`` at once.
 
@@ -380,7 +388,7 @@ def start(
     payload: dict[str, Any] = {"message": task}
     if model is not None:
         payload["model"] = model
-    return background.start(thread, payload, owner, queue=queue)
+    return background.start(thread, payload, owner, queue=queue, context=context)
 
 
 async def astart(name: str, task: str, **kwargs):

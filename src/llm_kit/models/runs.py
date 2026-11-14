@@ -25,6 +25,8 @@ class BackgroundRun(models.Model):
     status = models.CharField(max_length=12, choices=STATUS, default="queued", db_index=True)
     # waiting: submitted to the executor once the thread is free; queued/running: submitted.
     payload = models.JSONField(default=dict, blank=True, help_text="The run payload (message, input, resume...).")
+    # Server-set facts for run hooks (start(..., context=)); never from a request.
+    context = models.JSONField(default=dict, blank=True, help_text="Server-set context for run hooks.")
     # Who the run acts for, as when it was started.
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name="llm_background_runs"

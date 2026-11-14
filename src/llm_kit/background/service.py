@@ -87,6 +87,7 @@ def start(
     tenant: Any = None,
     queue: bool | None = None,
     links: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
 ) -> BackgroundRun:
     """Start a run of ``thread``'s graph in the background and return it at once.
 
@@ -100,13 +101,18 @@ def start(
     when the runs before it have finished, in order. A ``resume`` never waits: it answers the
     interrupt the thread is stopped at, and a queue doesn't move past an unanswered interrupt.
 
+    ``context``: facts only the server knows, for the run hooks (``run.context`` in the worker): a
+    small JSON object, saved with the run. No transport sets it from a request.
+
     ``links``: ``BackgroundRun`` fields linking a background subagent to the run that started it
     (set by the harness; see ``llm_kit.background.subagents``).
     """
     from llm_kit import conf
+    from llm_kit.core.hooks import check_context
 
     owner = _owner(owner, user=user, tenant=tenant)
     payload = dict(payload or {})
+    context = check_context(context)  # ValueError before anything is saved
     if queue is None:
         queue = bool(conf.get("RUN_QUEUE"))
     if "resume" in payload:
@@ -126,6 +132,7 @@ def start(
         "session_key": "" if owner.is_authenticated else owner.visitor_id,
         "tenant": owner.tenant_id,
         "executor": executor,
+        "context": context,
         **(links or {}),
     }
     busy = active_run(thread)
@@ -275,7 +282,9 @@ async def aexecute(run_id: str) -> None:
             inherit_limits(run, config)
         graph = get_graph(run.graph)
         # The run hooks run here, in the process that runs it, from the saved payload and owner.
-        setup = await sync_to_async(runs.prepare)(run.thread, run.payload, owner=owner, background=True, config=config)
+        setup = await sync_to_async(runs.prepare)(
+            run.thread, run.payload, owner=owner, background=True, config=config, context=run.context
+        )
         async for event in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
             if event["event"] == "end":
                 result = event["data"]

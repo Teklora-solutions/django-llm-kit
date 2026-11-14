@@ -20,6 +20,10 @@ the process that runs it: the view for a streamed or REST run, the worker for a 
 * Context managers (returned, or added with ``enter()``) are entered around the whole run, in the
   order given, and exited when it ends however it ends: set ContextVars, write a row in
   ``finally``.
+* ``run.context``: facts only your server knows (the channel, an API key's narrowed permissions,
+  attachment ids already checked), passed by your own code with ``context=``
+  (``background.start``, ``agents.run``/``start``, ``runtime.runs.prepare``). No transport sets it
+  from a request, so a client can't. A small JSON object, saved with a background run.
 
 A hook that raises fails the run before anything runs: ``RunRefused`` (and ``BadRequest``)
 refuse it (403/400); anything else is an ``error`` event, a 500, or a background run in status
@@ -41,7 +45,10 @@ from llm_kit.core.errors import BadRequest, LLMKitError
 
 logger = logging.getLogger("llm_kit")
 
-__all__ = ["HookFailed", "RunRefused", "RunSetup", "aentered", "entered", "hooks_for", "prepare"]
+CONTEXT_KEY = "__llm_kit_context"  # configurable: the run's server-set context (never from a client)
+MAX_CONTEXT_BYTES = 16_384  # it is saved with a background run, for the worker
+
+__all__ = ["CONTEXT_KEY", "HookFailed", "RunRefused", "RunSetup", "aentered", "entered", "hooks_for", "prepare"]
 
 
 class RunRefused(LLMKitError):
@@ -63,6 +70,8 @@ class RunSetup:
     owner: Any = None  # who the run acts for (the Django side: an ``access.Owner``)
     thread: Any = None  # the ``Thread``, when the run has one
     background: bool = False
+    # Facts only the server knows, passed by your own code (``context=``): never from a request.
+    context: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
     state: dict[str, Any] = field(default_factory=dict)
     contexts: list[Any] = field(default_factory=list)
 
@@ -84,6 +93,28 @@ class RunSetup:
         if not (hasattr(manager, "__enter__") or hasattr(manager, "__aenter__")):
             raise HookFailed(f"{manager!r} is not a context manager.")
         self.contexts.append(manager)
+
+
+def check_context(context: Any) -> dict[str, Any]:
+    """``context`` as it will be stored: a small JSON object. Raises ``ValueError``."""
+    import json
+
+    if context is None:
+        return {}
+    if not isinstance(context, Mapping):
+        raise ValueError("context must be a dict.")
+    try:
+        encoded = json.dumps(dict(context))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"context must be JSON-serialisable: {e}") from None
+    if len(encoded.encode()) > MAX_CONTEXT_BYTES:
+        raise ValueError(f"context is over {MAX_CONTEXT_BYTES} bytes; pass ids, not data.")
+    return json.loads(encoded)
+
+
+def context_of(config: Any) -> dict[str, Any]:
+    """The server-set context of the run ``config`` belongs to (for tools)."""
+    return dict(((config or {}).get("configurable") or {}).get(CONTEXT_KEY) or {})
 
 
 def _load(hook: Any) -> Any:
@@ -134,6 +165,7 @@ def prepare(
     thread: Any = None,
     background: bool = False,
     graph_hook: Any = None,
+    context: Mapping[str, Any] | None = None,
 ) -> RunSetup:
     """Run the hooks for a run of ``graph``; returns the setup with the final input, config and
     context managers. Raises ``RunRefused``/``BadRequest``, or ``HookFailed`` for anything else."""
@@ -145,7 +177,10 @@ def prepare(
         owner=owner,
         thread=thread,
         background=background,
+        context=MappingProxyType(copy.deepcopy(dict(context or {}))),
     )
+    if context:  # tools and background subagents started by this run see it too
+        config.setdefault("configurable", {})[CONTEXT_KEY] = dict(run.context)
     for hook in hooks_for(graph_hook):
         try:
             result = hook(run)

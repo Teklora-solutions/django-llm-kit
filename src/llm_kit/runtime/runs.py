@@ -79,9 +79,11 @@ def build_config(thread, payload: dict[str, Any], user=None, *, owner=None) -> d
     return config
 
 
-def prepare(thread, payload: dict[str, Any], *, owner, background: bool = False, config=None) -> RunSetup:
+def prepare(thread, payload: dict[str, Any], *, owner, background: bool = False, config=None, context=None) -> RunSetup:
     """The run's input, config and context managers, after the run hooks (``RUN_HOOKS`` and the
     graph's ``prepare``). Call it in the process that runs the graph, just before running it.
+
+    ``context``: server-set facts for the hooks (``run.context``); never from a request.
 
     Raises ``BadRequest``, ``BudgetExceeded``, ``RunRefused`` or ``HookFailed``."""
     from llm_kit.core.hooks import prepare as run_hooks
@@ -99,6 +101,7 @@ def prepare(thread, payload: dict[str, Any], *, owner, background: bool = False,
         thread=thread,
         background=background,
         graph_hook=prepare_hook(thread.graph),
+        context=context,
     )
 
 

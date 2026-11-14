@@ -39,7 +39,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.core.hooks`
 
-`RunSetup` (`graph`, `input`, `config`, `payload`, `owner`, `thread`, `background`; `set_state()`, `set_configurable()`, `add_callback()`, `enter()`), `RunRefused`, `HookFailed`, `prepare(...)`. See [Run hooks](../guides/graphs.md#run-hooks).
+`RunSetup` (`graph`, `input`, `config`, `payload`, `owner`, `thread`, `background`, `context`; `set_state()`, `set_configurable()`, `add_callback()`, `enter()`), `RunRefused`, `HookFailed`, `prepare(...)`, `context_of(config)`. See [Run hooks](../guides/graphs.md#run-hooks).
 
 ## `llm_kit.tools`
 
