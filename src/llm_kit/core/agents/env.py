@@ -38,6 +38,28 @@ class AgentEnv:
     def override(self, name: str) -> AgentOverride | None:
         return None
 
+    # Background subagents: a framework that can run work detached from the request overrides these.
+
+    def can_detach(self, config: Any) -> bool:
+        """Whether this run may start subagents in the background (a saved thread to report to)."""
+        return False
+
+    def start_detached(self, agent: str, task: str, config: Any, limits: dict[str, Any]) -> dict[str, Any]:
+        """Start ``agent`` on ``task`` in the background for this run; return ``{"id", "status"}``.
+
+        ``limits``: ``agents`` (names from the root agent down to it), ``budget`` (USD left, or
+        None), ``delegations`` (hand-offs left), ``max_depth``, ``parent_run`` (the parent agent's
+        recorded run id). When it finishes, its answer should come back to the run's thread."""
+        raise ConfigError("Starting subagents in the background needs a framework that runs background work.")
+
+    def task_status(self, task_id: str, config: Any) -> dict[str, Any] | None:
+        """A background task this run's thread started: ``status``, ``agent``, ``answer``; None if unknown."""
+        return None
+
+    def cancel_task(self, task_id: str, config: Any) -> bool | None:
+        """Stop a background task this run's thread started. None if unknown, False if already over."""
+        return None
+
     def graph(self, name: str, *, ephemeral: bool = False) -> Any:
         """The compiled graph for an agent, with a checkpointer (subagents run on it).
 

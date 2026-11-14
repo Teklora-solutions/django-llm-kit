@@ -59,6 +59,7 @@ class AgentSpec:
     prompt: str | Callable[..., str] = ""
     tools: Any = None  # None | [BaseTool | "name" | fn(config), ...] | fn(config) -> [BaseTool]
     subagents: tuple[str, ...] = ()
+    background_subagents: tuple[str, ...] = ()  # subagents it may start in the background
     output: type[BaseModel] | None = None
     max_steps: int = DEFAULT_MAX_STEPS
     fork: bool = False
@@ -78,6 +79,16 @@ class AgentSpec:
         if isinstance(self.subagents, str):
             object.__setattr__(self, "subagents", (self.subagents,))
         object.__setattr__(self, "subagents", tuple(self.subagents))
+        background = self.background_subagents
+        if background is True:
+            background = self.subagents
+        elif not background:
+            background = ()
+        elif isinstance(background, str):
+            background = (background,)
+        object.__setattr__(self, "background_subagents", tuple(background))
+        if stray := [n for n in self.background_subagents if n not in self.subagents]:
+            raise ConfigError(f"Agent {self.name!r}: background_subagents {stray} aren't among its subagents.")
         object.__setattr__(self, "essential", tuple(self.essential))
         if self.name in self.subagents:
             raise ConfigError(f"Agent {self.name!r} lists itself as a subagent.")
@@ -166,6 +177,7 @@ def agent(
     prompt: str | Callable[..., str] = "",
     tools: Any = None,
     subagents: Sequence[str] = (),
+    background_subagents: bool | Sequence[str] = (),
     output: type[BaseModel] | None = None,
     max_steps: int = DEFAULT_MAX_STEPS,
     fork: bool = False,
@@ -184,6 +196,11 @@ def agent(
         tools: ``tools.select(...)``, ``fn(config) -> tools``, or a list mixing tools, tool names
             and selections. Catalogue tools are always limited to the ones the caller may use.
         subagents: agents it may hand work to with the ``delegate`` tool.
+        background_subagents: ``True`` or some of ``subagents``: those it may also start in the
+            background (``delegate(..., background=true)``). It gets a task id back at once,
+            the subagent's answer arrives later as a message on its thread, and the
+            ``check_task``/``cancel_task`` tools follow or stop it. Needs a saved thread and a
+            framework that runs background work (the Django side does).
         output: a pydantic model; the final answer is also returned in that shape.
         max_steps: model calls per turn; on the last one it is told to answer.
         fork: as a subagent, start from a copy of the parent's conversation instead of only the task.
@@ -203,6 +220,7 @@ def agent(
             prompt=prompt,
             tools=tools,
             subagents=tuple(subagents),
+            background_subagents=background_subagents if background_subagents is True else tuple(background_subagents),
             output=output,
             max_steps=max_steps,
             fork=fork,

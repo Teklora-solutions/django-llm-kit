@@ -17,7 +17,7 @@ from typing import Annotated, Any, Literal
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import InjectedToolCallId, StructuredTool
-from pydantic import Field, create_model
+from pydantic import BaseModel, Field, create_model
 
 from llm_kit.core import config as settings
 from llm_kit.core.agents.limits import REQUEST_KEY, STACK_KEY, TREE_KEY, Tree, is_ephemeral, stack_of, tree_of
@@ -29,6 +29,8 @@ from llm_kit.core.runs import SUBAGENT_EVENT
 logger = logging.getLogger("llm_kit.agents")
 
 DELEGATE = "delegate"
+CHECK_TASK = "check_task"
+CANCEL_TASK = "cancel_task"
 
 
 class Refused(LLMKitError):
@@ -233,15 +235,126 @@ def _reply(name: str, result: AgentResult) -> str:
     return f"{name} stopped early ({result.stopped}). What it had:\n{result.for_model()}"
 
 
-def delegate_tool(parent: AgentSpec, subagents: list[AgentSpec], env, parent_messages=None) -> StructuredTool:
-    """One tool for every subagent: ``agent`` is an enum of their names, so the schema stays small."""
-    names = tuple(s.name for s in subagents)
-    args = create_model(
-        "Delegate",
-        agent=(Literal[names], Field(description="Which agent does the task.")),  # type: ignore[valid-type]
-        task=(str, Field(description="The task, with everything the agent needs to do it.")),
-        tool_call_id=(Annotated[str, InjectedToolCallId], ...),
+# ------------------------------------------------------------------ in the background
+
+
+def background_names(parent: AgentSpec, subagents: list[AgentSpec], config, env) -> tuple[str, ...]:
+    """The subagents ``parent`` may start in the background right now."""
+    if not parent.background_subagents or not subagents:
+        return ()
+    try:
+        if not env.can_detach(config):
+            return ()
+    except Exception:
+        logger.exception("Could not tell whether background subagents are possible here")
+        return ()
+    return tuple(s.name for s in subagents if s.name in parent.background_subagents)
+
+
+def _limits_for_detached(config) -> dict[str, Any]:
+    tree = tree_of(config)
+    left = None
+    if tree is not None and tree.budget is not None:
+        left = tree.budget - tree.spent()
+        if left <= 0:
+            raise Refused("This request's budget is used up; answer with what you have.")
+    meta = (config or {}).get("metadata") or {}
+    return {
+        "budget": None if left is None else str(left),
+        "delegations": tree.max_delegations - tree.delegations if tree is not None else None,
+        "max_depth": _max_depth(config),
+        "parent_run": str(meta.get("llm_kit_agent_run") or ""),
+    }
+
+
+def start_detached(parent: AgentSpec, name: str, task: str, config, env, allowed: tuple[str, ...]) -> str:
+    """Start a subagent in the background: checked like a hand-off (it uses one up), with the
+    request's remaining budget and hand-offs. Returns the reply for the model."""
+    if not (task or "").strip():
+        raise Refused("Give the task to hand over.")
+    if name not in allowed:
+        raise Refused(f"{name} can't work in the background here; hand it the task without background.")
+    sub = _check(parent, name, config, env)
+    limits = _limits_for_detached(config)
+    limits["agents"] = [*(stack_of(config) or (parent.name,)), sub.name]
+    started = env.start_detached(sub.name, task, config, limits)
+    return (
+        f"Started {sub.name} in the background: task {started['id']} ({started.get('status', 'queued')}). "
+        "Its answer will come to this conversation as a message when it is done; don't wait for it. "
+        f"Tell the user you've started on it. Use {CHECK_TASK} to see how it is going, {CANCEL_TASK} to stop it."
     )
+
+
+def task_tools(env) -> list[StructuredTool]:
+    """``check_task`` and ``cancel_task``, for the background tasks a thread started."""
+    from asgiref.sync import sync_to_async
+
+    class TaskId(BaseModel):
+        task_id: str = Field(description="The task id delegate gave you.")
+
+    def check(task_id: str, config: RunnableConfig) -> str:
+        found = env.task_status(task_id, config)
+        if found is None:
+            return f"There is no task {task_id} from this conversation."
+        line = f"Task {task_id} ({found.get('agent', '')}): {found['status']}."
+        if found.get("answer"):
+            line += f"\n{found['answer']}"
+        return line
+
+    def cancel(task_id: str, config: RunnableConfig) -> str:
+        stopped = env.cancel_task(task_id, config)
+        if stopped is None:
+            return f"There is no task {task_id} from this conversation."
+        return f"Task {task_id} is stopping." if stopped else f"Task {task_id} had already finished."
+
+    async def acheck(task_id: str, config: RunnableConfig) -> str:
+        return await sync_to_async(check)(task_id, config)
+
+    async def acancel(task_id: str, config: RunnableConfig) -> str:
+        return await sync_to_async(cancel)(task_id, config)
+
+    meta = {"llm_kit_kind": "background_task"}
+    return [
+        StructuredTool(
+            name=CHECK_TASK,
+            description="How a task you started in the background is going, and its answer once it is done.",
+            args_schema=TaskId,
+            func=check,
+            coroutine=acheck,
+            metadata=meta,
+        ),
+        StructuredTool(
+            name=CANCEL_TASK,
+            description="Stop a task you started in the background.",
+            args_schema=TaskId,
+            func=cancel,
+            coroutine=acancel,
+            metadata=meta,
+        ),
+    ]
+
+
+def delegate_tool(
+    parent: AgentSpec, subagents: list[AgentSpec], env, parent_messages=None, background: tuple[str, ...] = ()
+) -> StructuredTool:
+    """One tool for every subagent: ``agent`` is an enum of their names, so the schema stays small.
+
+    ``background``: subagents that may also be started in the background (an extra argument)."""
+    names = tuple(s.name for s in subagents)
+    fields: dict[str, Any] = {
+        "agent": (Literal[names], Field(description="Which agent does the task.")),  # type: ignore[valid-type]
+        "task": (str, Field(description="The task, with everything the agent needs to do it.")),
+    }
+    if background:
+        fields["background"] = (
+            bool,
+            Field(
+                default=False,
+                description="Start it in the background and carry on: you get a task id now, and its answer "
+                f"arrives later as a message. Only for: {', '.join(background)}. For long tasks.",
+            ),
+        )
+    args = create_model("Delegate", **fields, tool_call_id=(Annotated[str, InjectedToolCallId], ...))
     lines = "\n".join(
         f"- {s.name}: {s.description}" + (" (sees this conversation)" if s.fork else "") for s in subagents
     )
@@ -250,7 +363,18 @@ def delegate_tool(parent: AgentSpec, subagents: list[AgentSpec], env, parent_mes
         f"conversation unless noted, so include everything it needs.\n{lines}"
     )
 
-    def run(agent: str, task: str, tool_call_id: str, config: RunnableConfig) -> str:
+    def detached(agent: str, task: str, config) -> str:
+        try:
+            return start_detached(parent, agent, task, config, env, background)
+        except Refused as e:
+            return f"Refused: {e}"
+        except Exception:
+            logger.exception("Could not start %s in the background", agent)
+            return f"{agent} couldn't be started in the background; hand it the task without background."
+
+    def run(agent: str, task: str, tool_call_id: str, config: RunnableConfig, background: bool = False) -> str:
+        if background:
+            return detached(agent, task, config)
         try:
             result = run_subagent(
                 parent, agent, task, config, env, call_id=tool_call_id, parent_messages=parent_messages
@@ -262,7 +386,11 @@ def delegate_tool(parent: AgentSpec, subagents: list[AgentSpec], env, parent_mes
             return f"{agent} failed before finishing; do the task another way or tell the user."
         return _reply(agent, result)
 
-    async def arun(agent: str, task: str, tool_call_id: str, config: RunnableConfig) -> str:
+    async def arun(agent: str, task: str, tool_call_id: str, config: RunnableConfig, background: bool = False) -> str:
+        if background:
+            from asgiref.sync import sync_to_async
+
+            return await sync_to_async(detached)(agent, task, config)
         try:
             result = await arun_subagent(
                 parent, agent, task, config, env, call_id=tool_call_id, parent_messages=parent_messages
