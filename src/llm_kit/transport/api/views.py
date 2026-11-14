@@ -31,7 +31,10 @@ class ThreadViewSet(viewsets.ModelViewSet):
     permission_classes = [ThreadAccess]
 
     def get_queryset(self):
-        return access.threads_for(access.owner_from_request(self.request))
+        try:
+            return access.threads_for(access.owner_from_request(self.request))
+        except access.NotAllowed as e:
+            raise PermissionDenied(str(e)) from e
 
     def get_object(self):
         # Look up by id across all threads; ThreadAccess decides who may use it.
@@ -70,7 +73,7 @@ class ThreadViewSet(viewsets.ModelViewSet):
         try:
             runs.validate_choice(thread.graph, payload.get("model"))
             graph_input = runs.build_input(payload)
-            config = runs.build_config(thread, payload, request.user)
+            config = runs.build_config(thread, payload, owner=access.owner_from_request(request))
         except runs.BadRequest as e:
             raise ValidationError({"detail": str(e)}) from e
         state = runs.invoke_run(get_graph(thread.graph), graph_input, config)

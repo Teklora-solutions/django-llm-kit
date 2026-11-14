@@ -43,11 +43,16 @@ __all__ = [
 ]
 
 
-def build_config(thread, payload: dict[str, Any], user=None) -> dict[str, Any]:
-    """RunnableConfig for a run on ``thread`` (a ``llm_kit.models.Thread``)."""
-    from llm_kit.tools.caller import CONFIG_KEY, caller_for
+def build_config(thread, payload: dict[str, Any], user=None, *, owner=None) -> dict[str, Any]:
+    """RunnableConfig for a run on ``thread`` (a ``llm_kit.models.Thread``).
 
-    caller = caller_for(user)
+    ``owner`` (from ``access.owner_from_request`` / ``owner_from_scope``) supplies the user and
+    the tenant already resolved for this request; otherwise ``TENANT_RESOLVER(user)``."""
+    from llm_kit.tools.caller import _UNSET, CONFIG_KEY, caller_for
+
+    if owner is not None:
+        user = owner.user
+    caller = caller_for(user, _UNSET if owner is None else owner.tenant)
     metadata = {"llm_kit_graph": thread.graph}
     if caller.is_authenticated:
         metadata["user_id"] = str(caller.user_id)

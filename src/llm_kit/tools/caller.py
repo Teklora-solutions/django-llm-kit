@@ -7,6 +7,8 @@ LangGraph never copies ``"__"`` keys into checkpoints, and ``build_config`` drop
 
 from __future__ import annotations
 
+import functools
+import inspect
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,11 +55,40 @@ class Caller:
         return bool(self.user.has_perm(permission))
 
 
-def resolve_tenant(user) -> Any:
+@functools.lru_cache(maxsize=32)
+def _context_params(fn) -> tuple[str, ...]:
+    """Which of ``request`` / ``scope`` a resolver takes (by name, or through ``**kwargs``)."""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return ()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return ("request", "scope")
+    return tuple(name for name in ("request", "scope") if name in params)
+
+
+def resolve_tenant(user, *, request=None, scope=None) -> Any:
+    """``TENANT_RESOLVER(user)``, or ``(user, request=..., scope=...)`` when it takes them.
+
+    ``request`` is the Django (or DRF) request, ``scope`` the Channels scope; both are None
+    outside a request (``agents.run`` from a task). A resolver that raises Django's
+    ``PermissionDenied`` (a tenant the user doesn't belong to) refuses the request:
+    ``NotAllowed``, a 403 from the views and a 4403 close from the WebSocket consumer.
+    """
     path = conf.get("TENANT_RESOLVER")
     if not path or user is None or not getattr(user, "is_authenticated", False):
         return None
-    return import_target(path)(user)
+    fn = import_target(path)
+    context = {"request": request, "scope": scope}
+    kwargs = {name: context[name] for name in _context_params(fn)}
+    from django.core.exceptions import PermissionDenied
+
+    try:
+        return fn(user, **kwargs)
+    except PermissionDenied as e:
+        from llm_kit.runtime.access import NotAllowed
+
+        raise NotAllowed(str(e) or "Not allowed for this tenant.") from e
 
 
 def caller_for(user, tenant: Any = _UNSET) -> Caller:
