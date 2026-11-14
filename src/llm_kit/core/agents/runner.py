@@ -42,12 +42,12 @@ def root_config(spec: AgentSpec, config: dict[str, Any] | None = None, thread_id
     return config
 
 
-def _start(name, task, config, env, thread_id):
+def _start(name, task, config, env, thread_id, input=None):
     spec = name if isinstance(name, AgentSpec) else get_agent(name)
     env = env or default_env()
     config = root_config(spec, config, thread_id)
     graph = env.graph(spec.name, ephemeral=is_ephemeral(config))
-    return spec, graph, {"messages": [HumanMessage(content=task)]}, config
+    return spec, graph, input if input is not None else {"messages": [HumanMessage(content=task)]}, config
 
 
 def run(
@@ -58,8 +58,10 @@ def run(
     env: AgentEnv | None = None,
     thread_id: str | None = None,
     nested: bool = False,
+    input: Any = None,
 ) -> AgentResult:
-    spec, graph, start, config = _start(name, task, config, env, thread_id)
+    """``input``: the graph input to use instead of the task as one user message (from run hooks)."""
+    spec, graph, start, config = _start(name, task, config, env, thread_id, input)
     if nested:
         from llm_kit.core.agents.delegate import drive
 
@@ -77,8 +79,10 @@ async def arun(
     env: AgentEnv | None = None,
     thread_id: str | None = None,
     nested: bool = False,
+    input: Any = None,
 ) -> AgentResult:
-    spec, graph, start, config = _start(name, task, config, env, thread_id)
+    """``input``: the graph input to use instead of the task as one user message (from run hooks)."""
+    spec, graph, start, config = _start(name, task, config, env, thread_id, input)
     if nested:
         from llm_kit.core.agents.delegate import adrive
 

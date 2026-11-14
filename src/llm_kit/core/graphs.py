@@ -7,8 +7,9 @@ Each registered target is a dotted path (``"pkg.mod:attr"`` or
 * a compiled graph -> copied with the checkpointer attached (unless it has one)
 * a callable ``fn(checkpointer) -> compiled graph`` (e.g. wrapping ``create_agent``)
 
-or a dict ``{"graph": <one of the above>, "touchpoint": "<name>"}`` naming the
-touchpoint whose model policy applies to a client's ``"model"`` choice.
+or a dict ``{"graph": <one of the above>, "touchpoint": "<name>", "prepare": "<hook>"}`` naming
+the touchpoint whose model policy applies to a client's ``"model"`` choice, and a run hook for
+this graph (see ``llm_kit.core.hooks``).
 """
 
 from __future__ import annotations
@@ -87,6 +88,11 @@ class GraphRegistry:
         """The touchpoint a client's ``"model"`` choice applies to, if the graph declares one."""
         target = self._targets().get(name)
         return target.get("touchpoint") if isinstance(target, Mapping) else None
+
+    def prepare_hook(self, name: str) -> Any:
+        """The graph's own run hook (``{"graph": ..., "prepare": "pkg.mod:fn"}``), if any."""
+        target = self._targets().get(name)
+        return target.get("prepare") if isinstance(target, Mapping) else None
 
     def import_modules(self) -> None:
         """Import every registered graph's module (without compiling it), so

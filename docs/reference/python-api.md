@@ -37,6 +37,10 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 `start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`, and the signal `run_finished` (`run`, `status`, `result`, `error`; [sent once](../guides/streaming.md#when-a-run-finishes)). See [Background runs](../guides/streaming.md#background-runs).
 
+## `llm_kit.core.hooks`
+
+`RunSetup` (`graph`, `input`, `config`, `payload`, `owner`, `thread`, `background`; `set_state()`, `set_configurable()`, `add_callback()`, `enter()`), `RunRefused`, `HookFailed`, `prepare(...)`. See [Run hooks](../guides/graphs.md#run-hooks).
+
 ## `llm_kit.tools`
 
 `expose(model, **options)`, `register(tool, *, permission=…, category=…)`, `select(*, names, categories, kinds)`, `for_user(user, tenant=…)`, `for_config(config)`, `all_tools()`, `guidance(tools)`, `pending_for(user)`, `approve(proposal, by)`, `reject(proposal, by, reason="")`, `PUBLIC`, `Caller`. See [Model tools](../guides/tools.md).

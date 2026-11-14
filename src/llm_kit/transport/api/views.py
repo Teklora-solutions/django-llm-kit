@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -17,6 +19,8 @@ from llm_kit.transport.api.serializers import (
     ThreadSerializer,
     TouchpointSerializer,
 )
+
+logger = logging.getLogger("llm_kit")
 
 
 class ThreadViewSet(viewsets.ModelViewSet):
@@ -90,13 +94,17 @@ class ThreadViewSet(viewsets.ModelViewSet):
             return _busy(busy)
         try:
             runs.validate_choice(thread.graph, payload.get("model"))
-            graph_input = runs.build_input(payload)
-            config = runs.build_config(thread, payload, owner=owner)
+            setup = runs.prepare(thread, payload, owner=owner)
         except runs.BadRequest as e:
             raise ValidationError({"detail": str(e)}) from e
         except BudgetExceeded as e:
             return Response({"detail": str(e)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
-        state = runs.invoke_run(get_graph(thread.graph), graph_input, config)
+        except runs.RunRefused as e:
+            raise PermissionDenied(str(e)) from e
+        except runs.HookFailed as e:
+            logger.exception("Run hook failed for thread %s", thread.pk)
+            return Response({"detail": runs.error_message(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        state = runs.invoke_run(get_graph(thread.graph), setup.input, setup.config, setup.contexts)
         thread.save(update_fields=["updated_at"])
         _advance(thread)
         return Response(state, status=status.HTTP_200_OK)

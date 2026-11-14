@@ -18,7 +18,8 @@ LLM_KIT = {
 
 | Key | Default | Meaning |
 |---|---|---|
-| `GRAPHS` | `{}` | name → dotted path, or `{"graph": path, "touchpoint": name}`. See [Graphs](../guides/graphs.md) |
+| `GRAPHS` | `{}` | name → dotted path, or `{"graph": path, "touchpoint": name, "prepare": hook}`. See [Graphs](../guides/graphs.md) |
+| `RUN_HOOKS` | `[]` | [run hooks](../guides/graphs.md#run-hooks) called before every run, wherever it runs: server-set state, configurable keys, context managers |
 | `DEFAULT_GRAPH` | `None` | graph used when a request doesn't name one; falls back to the only graph |
 | `CHECKPOINTER` | `None` | `None` (`DjangoSaver`), `"postgres"`, a dotted path, or `{"sync": …, "async": …}`. See [Checkpointers](../guides/checkpointer.md) |
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes for SSE/WebSocket runs (`custom` carries subagents' messages) |

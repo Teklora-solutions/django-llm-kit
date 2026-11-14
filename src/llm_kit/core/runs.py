@@ -88,47 +88,60 @@ def _interrupts(chunk: dict) -> list[dict]:
     return [to_json(i) for i in chunk.get("__interrupt__", ())]
 
 
-async def astream_run(graph, input: Any, config: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
-    """Run ``graph`` and yield llm_kit events. Errors become an ``error`` event."""
-    modes = list(settings.get("STREAM_MODES"))
+async def astream_run(graph, input: Any, config: dict[str, Any], contexts=()) -> AsyncIterator[dict[str, Any]]:
+    """Run ``graph`` and yield llm_kit events. Errors become an ``error`` event.
+
+    ``contexts``: context managers (sync or async, from run hooks) entered around the run."""
+    from llm_kit.core.hooks import aentered
+
     try:
-        async for mode, chunk in graph.astream(input, config, stream_mode=modes):
-            if mode == "messages":
-                msg, meta = chunk
-                data = {"node": meta.get("langgraph_node"), "message": message_to_json(msg, compact=True)}
-                if meta.get("llm_kit_agent"):  # agents label their tokens; subagents' have depth > 0
-                    data["agent"] = meta["llm_kit_agent"]
-                    data["depth"] = int(meta.get("llm_kit_depth") or 0)
-                yield {"event": "token" if isinstance(msg, AIMessageChunk) else "message", "data": data}
-            elif mode == "custom" and isinstance(chunk, dict) and chunk.get(SUBAGENT_EVENT):
-                msg = chunk["message"]
-                yield {
-                    "event": "token" if isinstance(msg, AIMessageChunk) else "message",
-                    "data": {
-                        "node": chunk.get("node"),
-                        "message": message_to_json(msg, compact=True),
-                        "agent": chunk.get("agent"),
-                        "depth": chunk.get("depth", 0),
-                    },
-                }
-            elif mode == "updates":
-                if "__interrupt__" in chunk:
-                    yield {"event": "interrupt", "data": {"interrupts": _interrupts(chunk)}}
-                else:
-                    yield {"event": "update", "data": to_json(chunk)}
-            else:
-                yield {"event": mode, "data": to_json(chunk)}
-        state = await graph.aget_state(config)
-        yield {
-            "event": "end",
-            "data": {"next": list(state.next), "interrupts": [to_json(i) for i in state.interrupts]},
-        }
+        async with aentered(contexts):
+            async for event in _astream(graph, input, config):
+                yield event
     except Exception as exc:  # surfaced to the client as an event
         logger.exception("llm_kit run failed for thread %s", config["configurable"].get("thread_id"))
         yield {"event": "error", "data": {"message": error_message(exc)}}
 
 
-def invoke_run(graph, input: Any, config: dict[str, Any]) -> dict[str, Any]:
+async def _astream(graph, input: Any, config: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    modes = list(settings.get("STREAM_MODES"))
+    async for mode, chunk in graph.astream(input, config, stream_mode=modes):
+        if mode == "messages":
+            msg, meta = chunk
+            data = {"node": meta.get("langgraph_node"), "message": message_to_json(msg, compact=True)}
+            if meta.get("llm_kit_agent"):  # agents label their tokens; subagents' have depth > 0
+                data["agent"] = meta["llm_kit_agent"]
+                data["depth"] = int(meta.get("llm_kit_depth") or 0)
+            yield {"event": "token" if isinstance(msg, AIMessageChunk) else "message", "data": data}
+        elif mode == "custom" and isinstance(chunk, dict) and chunk.get(SUBAGENT_EVENT):
+            msg = chunk["message"]
+            yield {
+                "event": "token" if isinstance(msg, AIMessageChunk) else "message",
+                "data": {
+                    "node": chunk.get("node"),
+                    "message": message_to_json(msg, compact=True),
+                    "agent": chunk.get("agent"),
+                    "depth": chunk.get("depth", 0),
+                },
+            }
+        elif mode == "updates":
+            if "__interrupt__" in chunk:
+                yield {"event": "interrupt", "data": {"interrupts": _interrupts(chunk)}}
+            else:
+                yield {"event": "update", "data": to_json(chunk)}
+        else:
+            yield {"event": mode, "data": to_json(chunk)}
+    state = await graph.aget_state(config)
+    yield {
+        "event": "end",
+        "data": {"next": list(state.next), "interrupts": [to_json(i) for i in state.interrupts]},
+    }
+
+
+def invoke_run(graph, input: Any, config: dict[str, Any], contexts=()) -> dict[str, Any]:
     """Run ``graph`` to completion (or the next interrupt) and return its state."""
-    graph.invoke(input, config)
+    from llm_kit.core.hooks import entered
+
+    with entered(contexts):
+        graph.invoke(input, config)
     return state_to_json(graph.get_state(config))

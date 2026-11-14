@@ -178,6 +178,30 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
     return _config(name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **extra)[0]
 
 
+def _hooks(name: str, task: str, cfg: dict, thread, nested: bool):
+    """The run hooks for a run started from code (a run inside another's request already had them)."""
+    if nested:
+        return None
+    from langchain_core.messages import HumanMessage
+
+    from llm_kit.core.hooks import prepare
+    from llm_kit.runtime import access
+    from llm_kit.runtime.graphs import prepare_hook
+    from llm_kit.tools.caller import caller_from
+
+    caller = caller_from(cfg)
+    owner = access.Owner(user=getattr(caller, "user", None), tenant=getattr(caller, "tenant", None))
+    return prepare(
+        name,
+        {"messages": [HumanMessage(content=task)]},
+        cfg,
+        payload={"message": task},
+        owner=owner,
+        thread=thread,
+        graph_hook=prepare_hook(name),
+    )
+
+
 def _forget(cfg: dict, nested: bool) -> None:
     """Free a throwaway run's in-memory state: its thread and every subagent thread it started.
 
@@ -223,8 +247,11 @@ def run(
         **config,
     )
     try:
-        with _detached(nested):
-            result = runner.run(name, task, config=cfg, nested=nested)
+        setup = _hooks(name, task, cfg, thread, nested)
+        from llm_kit.core.hooks import entered
+
+        with _detached(nested), entered(setup.contexts if setup else ()):
+            result = runner.run(name, task, config=cfg, nested=nested, input=setup.input if setup else None)
     finally:
         if thread is None and thread_id is None:
             _forget(cfg, nested)
@@ -258,8 +285,12 @@ async def arun(
         **config,
     )
     try:
-        with _detached(nested):
-            result = await runner.arun(name, task, config=cfg, nested=nested)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, nested)
+        from llm_kit.core.hooks import aentered
+
+        async with aentered(setup.contexts if setup else ()):
+            with _detached(nested):
+                result = await runner.arun(name, task, config=cfg, nested=nested, input=setup.input if setup else None)
     finally:
         if thread is None and thread_id is None:
             await sync_to_async(_forget)(cfg, nested)
@@ -283,8 +314,6 @@ async def stream(
     """llm-kit events (``token``, ``message``, ``update``, ``end``, ``error``) as the agent works.
     Subagents' tokens arrive too, with ``agent`` and ``depth`` set. A stream is always its own
     request (it never joins a running agent)."""
-    from langchain_core.messages import HumanMessage
-
     from llm_kit.core.runs import astream_run
     from llm_kit.runtime.graphs import get_graph
 
@@ -301,9 +330,10 @@ async def stream(
     )
     try:
         graph = get_graph(name, ephemeral=thread is None and thread_id is None)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, False)
         # Only touch the context when there is a parent to hide (the generator may be resumed elsewhere).
         with _detached(running_parent() is None):
-            async for event in astream_run(graph, {"messages": [HumanMessage(content=task)]}, cfg):
+            async for event in astream_run(graph, setup.input, setup.config, setup.contexts):
                 yield event
     finally:
         if thread is None and thread_id is None:

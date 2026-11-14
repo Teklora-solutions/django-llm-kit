@@ -103,6 +103,9 @@ DEFAULTS: dict[str, Any] = {
     # "celery", "django_q", or "pkg.mod:fn" taking the run id), how watchers get their events
     # ("auto": the Channels layer when CHANNEL_LAYERS is set, else "local" to this process),
     # and after how many seconds without a heartbeat a running run counts as lost.
+    # Run hooks: fn(run) called before every run, in the process that runs it (see llm_kit.core.hooks).
+    # Per graph: GRAPHS[name] = {"graph": ..., "prepare": "pkg.mod:fn"}.
+    "RUN_HOOKS": [],
     "RUN_EXECUTOR": "thread",
     # A background run started on a busy thread waits its turn instead of being refused (409);
     # per call: "queue": true/false, start(..., queue=).

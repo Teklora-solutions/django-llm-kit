@@ -274,7 +274,9 @@ async def aexecute(run_id: str) -> None:
 
             inherit_limits(run, config)
         graph = get_graph(run.graph)
-        async for event in runs.astream_run(graph, runs.build_input(run.payload), config):
+        # The run hooks run here, in the process that runs it, from the saved payload and owner.
+        setup = await sync_to_async(runs.prepare)(run.thread, run.payload, owner=owner, background=True, config=config)
+        async for event in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
             if event["event"] == "end":
                 result = event["data"]
                 status = "interrupted" if result.get("interrupts") else "done"
@@ -285,6 +287,9 @@ async def aexecute(run_id: str) -> None:
         status = "cancelled"
         if task is not None:
             task.uncancel()
+    except runs.RunRefused as exc:  # a run hook said no: its message is for people
+        status, error = "error", str(exc)[:500]
+        await bus.publish(run.run_id, {"event": "error", "data": {"message": error}})
     except Exception as exc:
         logger.exception("llm_kit background run %s failed", run.run_id)
         status, error = "error", runs.error_message(exc)[:500]
