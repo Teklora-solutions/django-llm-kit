@@ -39,6 +39,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- Budget totals started at $0 recorded spend for up to 30 s on a freshly booted host (monotonic time under the refresh interval made a never-read total look fresh).
 - A tenant member could read another member's own budget and spend (`GET llm/api/budgets/?scope=member&member=<id>`). Seeing someone else's member budget now needs the same permission as setting it.
 - `embed()` ignored a touchpoint's dotted-path or callable `backend=` and fell back to `EMBEDDING_BACKEND`. It now uses `touchpoint(embedding_backend=)`, then `backend=`, then the setting. A factory that returns a chat model raises an error that names it (#17).
 

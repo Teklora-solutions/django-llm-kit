@@ -102,3 +102,12 @@ def test_counter_adds_up_in_micro_dollars():
     counter.add(key, start, Decimal("1.25"))
     assert counter.get(key, start) == Decimal("1.250001")
     assert counter.get(key, datetime(2026, 11, 15)) == 0  # a new period
+
+
+def test_a_total_is_read_the_first_time_even_on_a_freshly_booted_host(monkeypatch):
+    import time
+
+    monkeypatch.setattr(time, "monotonic", lambda: 5.0)  # 5 s of uptime: less than REFRESH
+    tracker = SpendTracker()
+    tracker.configure(lambda key, start: Decimal("7"))
+    assert tracker.spent(SpendKey(touchpoint="t.a")) == Decimal("7")

@@ -119,7 +119,9 @@ class SpendTracker:
         database query must not block the loop); until it lands, the last value is used."""
         with self._lock:
             entry = self._total(key)
-            stale = self.seed is not None and not entry.reading and time.monotonic() - entry.read_at > REFRESH
+            # Never read (read_at 0) is always stale: monotonic time can be under REFRESH on a fresh host.
+            due = entry.read_at == 0 or time.monotonic() - entry.read_at > REFRESH
+            stale = self.seed is not None and not entry.reading and due
             if stale:
                 entry.reading = True
             value = self._value(key, entry)
@@ -160,12 +162,13 @@ class SpendTracker:
             with self._lock:
                 entry = self._total(key)
                 entry.reading = False
-                entry.read_at = started  # don't retry on every call
+                entry.read_at = started or 1e-9  # don't retry on every call
             return
         with self._lock:
             entry = self._total(key)
             # The read includes everything already written; this process's calls before it are in it.
-            entry.recorded, entry.local, entry.read_at, entry.reading = Decimal(recorded), Decimal(0), started, False
+            entry.recorded, entry.local, entry.reading = Decimal(recorded), Decimal(0), False
+            entry.read_at = started or 1e-9  # 0 means "never read"
             entry.shared_at_read = shared
 
     def observe(self, call: Any) -> None:
