@@ -110,7 +110,9 @@ class Touchpoint:
             resolution.fallbacks = []
         if params:
             resolution.params = {**resolution.params, **params}
-        return build_for(self, resolution, env or default_env(), retry=policy_for(self, config, retry))
+        # Inside a running agent, its retry policy applies (but not its requested model).
+        run = config if config is not None else _running()
+        return build_for(self, resolution, env or default_env(), retry=policy_for(self, run, retry))
 
     # ------------------------------------------------------- one-shot calls
 
@@ -168,11 +170,22 @@ class Touchpoint:
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 
-        Inside a graph node (config already has callbacks) the call joins that run; otherwise
-        it is a recorded run of its own, named after the touchpoint. Metadata you pass (for
-        example ``{"llm_kit_agent": "crm.writer"}``) is recorded with the call."""
+        Inside a graph node (config already has callbacks) the call joins that run. Called
+        without one from inside a running agent (a tool, a code agent, code they call), it
+        joins that agent's run too: recorded in its run tree and counted in its totals.
+        Otherwise it is a recorded run of its own, named after the touchpoint. Metadata you
+        pass (for example ``{"llm_kit_agent": "crm.writer"}``) is recorded with the call."""
         if config and config.get("callbacks"):
             return config
+        if (parent := _running()) is not None and parent.get("callbacks") is not None:
+            mine = config or {}
+            return {
+                **mine,
+                "callbacks": parent["callbacks"],
+                "metadata": {**(parent.get("metadata") or {}), **(mine.get("metadata") or {})},
+                "configurable": {**(parent.get("configurable") or {}), **(mine.get("configurable") or {})},
+                "run_name": mine.get("run_name") or self.name,
+            }
         from llm_kit.core.observability.handler import get_handler
 
         handler = get_handler()
@@ -181,6 +194,12 @@ class Touchpoint:
         return {**(config or {}), "callbacks": [handler], "run_name": self.name}
 
     _run_config = run_config
+
+
+def _running() -> RunnableConfig | None:
+    from llm_kit.core.agents.limits import running_config
+
+    return running_config()
 
 
 def _as_run(llm: Runnable) -> Runnable:

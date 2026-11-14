@@ -30,6 +30,8 @@ llm = summarise.model(config=config)          # inside a graph node: honours the
 summarise.resolve()                           # which model(s) and why, without calling anything
 ```
 
+Called inside a running agent (from a tool or a code agent) without a `config`, `complete()` joins that agent's run: see [running agents](agents.md#running-agents).
+
 `model()` returns a LangChain chat model that wraps the default and its fallbacks. `bind_tools` and `with_structured_output` are applied to every candidate, so fallbacks keep working after you bind tools. `complete()` also parses the raw reply when a model answers in text instead of structured output.
 
 ## Rate limits and fallbacks

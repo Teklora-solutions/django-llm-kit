@@ -61,6 +61,15 @@ def tree_of(config) -> Tree | None:
     return ((config or {}).get("configurable") or {}).get(TREE_KEY)
 
 
+def running_config() -> dict | None:
+    """The config of the llm-kit run this code is running inside (a tool, a code agent, code
+    they call), or None outside one."""
+    from langchain_core.runnables.config import var_child_runnable_config
+
+    config = var_child_runnable_config.get()
+    return config if tree_of(config) is not None else None
+
+
 def stack_of(config) -> tuple[str, ...]:
     return tuple(((config or {}).get("configurable") or {}).get(STACK_KEY) or ())
 

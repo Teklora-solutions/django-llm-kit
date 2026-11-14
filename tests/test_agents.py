@@ -707,3 +707,49 @@ def test_agents_run_retry_reaches_the_model_calls(world, scripts, monkeypatch):
     scripts[R] = ["found", call("Report", {"answer": "ok"})]
     agents.run("tests.researcher", "x", user=world["alice"], retry="batch")
     assert seen_policies and all(p == RetryPolicy.BATCH for p in seen_policies)
+
+
+def test_a_touchpoint_called_inside_an_agent_joins_its_run(world, scripts, settings, code_agent):
+    from llm_kit.core.observability import flush, recorder
+    from llm_kit.core.touchpoints import RetryPolicy, get_touchpoint
+    from llm_kit.models import LLMCall, LLMRun
+
+    seen_inside = {}
+
+    def orchestrate(task, ctx):
+        helper = get_touchpoint("tests.helper")
+        seen_inside["retry"] = helper.model().retry  # the request's policy, no config passed
+        return helper.complete(task).content  # no config: joins the running agent
+
+    code_agent("t.orchestrator", orchestrate)
+    _recorded(settings)
+    try:
+        scripts[H] = ["helped"]
+        result = agents.run("t.orchestrator", "help", user=world["alice"], thread_id="orch-3", retry="batch")
+        assert flush()
+    finally:
+        recorder.configure([], None)
+
+    assert result.text == "helped"
+    assert seen_inside["retry"] == RetryPolicy.BATCH
+    assert LLMRun.objects.count() == 1  # no separate run for the touchpoint call
+    root = LLMRun.objects.get()
+    assert (root.thread_id, root.calls) == ("orch-3", 1)
+    call_row = LLMCall.objects.get()
+    assert (call_row.run_id, call_row.touchpoint) == (root.run_id, "tests.helper")
+    assert call_row.user == str(world["alice"].pk)
+
+
+def test_a_touchpoint_called_outside_an_agent_is_its_own_run(settings, scripts):
+    from llm_kit.core.observability import flush, recorder
+    from llm_kit.core.touchpoints import get_touchpoint
+    from llm_kit.models import LLMRun
+
+    _recorded(settings)
+    try:
+        scripts[H] = ["alone"]
+        assert get_touchpoint("tests.helper").complete("hi").content == "alone"
+        assert flush()
+    finally:
+        recorder.configure([], None)
+    assert list(LLMRun.objects.values_list("name", flat=True)) == ["tests.helper"]

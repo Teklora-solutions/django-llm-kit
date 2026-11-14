@@ -44,12 +44,9 @@ def _from_thread(name: str, thread, user, tenant, thread_id):
 
 def running_parent() -> dict | None:
     """The config of the llm-kit run this code is running inside, if any."""
-    from langchain_core.runnables.config import var_child_runnable_config
+    from llm_kit.core.agents.limits import running_config
 
-    from llm_kit.core.agents.limits import tree_of
-
-    parent = var_child_runnable_config.get()
-    return parent if tree_of(parent) is not None else None
+    return running_config()
 
 
 @contextlib.contextmanager
