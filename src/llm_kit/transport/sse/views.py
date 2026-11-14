@@ -72,7 +72,7 @@ def _resolve_thread(thread_id, request, body):
         thread = access.get_thread(thread_id, owner)
         runs.validate_choice(thread.graph, body.get("model"))
         created = False
-    return thread, created
+    return thread, created, owner
 
 
 @require_POST
@@ -88,10 +88,10 @@ async def stream(request, thread_id=None):
         return _error(400, "Body must be a JSON object.")
 
     try:
-        thread, created = await sync_to_async(_resolve_thread)(thread_id, request, body)
+        thread, created, owner = await sync_to_async(_resolve_thread)(thread_id, request, body)
         graph = get_graph(thread.graph)
         payload_input = runs.build_input(body)
-        config = await sync_to_async(runs.build_config)(thread, body, user)  # TENANT_RESOLVER may query
+        config = await sync_to_async(runs.build_config)(thread, body, owner=owner)
     except Thread.DoesNotExist:
         return _error(404, "Thread not found.")
     except access.NotAllowed as e:

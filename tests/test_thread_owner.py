@@ -20,8 +20,8 @@ def anonymous_mode(settings):
     settings.LLM_KIT = {**settings.LLM_KIT, "REQUIRE_AUTH": False}
 
 
-def new_thread(client, **body):
-    r = client.post(THREADS, {"graph": "chat", **body}, content_type="application/json")
+def new_thread(client, headers=None, **body):
+    r = client.post(THREADS, {"graph": "chat", **body}, content_type="application/json", headers=headers)
     assert r.status_code == 201, r.content
     return r.json()["id"]
 
@@ -173,3 +173,79 @@ def test_deleting_a_user_deletes_adopted_threads(anonymous_mode):
     visitor.force_login(user)
     user.delete()
     assert not Thread.objects.filter(pk=tid).exists()
+
+
+# -------------------------------------------------- a tenant picked per request
+
+
+@pytest.fixture
+def workspaces(settings, world):
+    from tests.testapp import tenancy
+
+    settings.LLM_KIT = {**settings.LLM_KIT, "TENANT_RESOLVER": "tests.testapp.tenancy:workspace_for"}
+    tenancy.ALSO_MEMBER[world["alice"].pk] = {world["globex"].pk}  # alice is in both
+    yield world
+    tenancy.ALSO_MEMBER.clear()
+
+
+def test_the_resolver_sees_the_request_and_scopes_threads_by_it(workspaces):
+    acme, globex = workspaces["acme"].pk, workspaces["globex"].pk
+    client = Client()
+    client.force_login(workspaces["alice"])
+    in_acme = new_thread(client, headers={"X-Workspace-Id": str(acme)})
+    in_globex = new_thread(client, headers={"X-Workspace-Id": str(globex)})
+    assert Thread.objects.get(pk=in_acme).tenant == str(acme)
+    assert Thread.objects.get(pk=in_globex).tenant == str(globex)
+    listed = client.get(THREADS, HTTP_X_WORKSPACE_ID=str(globex)).json()
+    assert [t["id"] for t in listed] == [in_globex]
+    # A thread from workspace A can't be used while acting in workspace B.
+    as_globex = {"headers": {"X-Workspace-Id": str(globex)}, "content_type": "application/json"}
+    assert client.post(f"{THREADS}{in_acme}/runs/", {"message": "hi"}, **as_globex).status_code in (403, 404)
+    assert client.post(f"{THREADS}{in_globex}/runs/", {"message": "hi"}, **as_globex).status_code == 200
+
+
+def test_a_workspace_the_user_is_not_in_is_refused(workspaces):
+    client = Client()
+    client.force_login(workspaces["bob"])  # only in globex
+    acme = str(workspaces["acme"].pk)
+    assert client.get(THREADS, HTTP_X_WORKSPACE_ID=acme).status_code == 403
+    r = client.post(THREADS, {"graph": "chat"}, content_type="application/json", HTTP_X_WORKSPACE_ID=acme)
+    assert r.status_code == 403
+    r = client.post("/llm/stream/", {"message": "x"}, content_type="application/json", HTTP_X_WORKSPACE_ID=acme)
+    assert r.status_code == 403
+    assert not Thread.objects.exists()
+
+
+def test_resolvers_taking_only_the_user_still_work(world):
+    from llm_kit.tools.caller import resolve_tenant
+
+    assert resolve_tenant(world["alice"], request=object()) == world["acme"].pk  # tenant_for(user)
+
+
+async def test_the_websocket_scope_reaches_the_resolver(workspaces):
+    from channels.routing import URLRouter
+    from channels.testing import WebsocketCommunicator
+
+    from llm_kit.transport.ws.routing import websocket_urlpatterns
+
+    app = URLRouter(websocket_urlpatterns)
+
+    def connect_as(user, workspace):
+        c = WebsocketCommunicator(app, "/ws/llm/threads/", headers=[(b"x-workspace-id", str(workspace).encode())])
+        c.scope["user"] = user
+        return c
+
+    refused = connect_as(workspaces["bob"], workspaces["acme"].pk)
+    connected, code = await refused.connect()
+    assert not connected and code == 4403
+
+    c = connect_as(workspaces["alice"], workspaces["globex"].pk)
+    assert (await c.connect())[0]
+    await c.send_json_to({"type": "run", "message": "hey"})
+    first = await c.receive_json_from(timeout=10)
+    assert first["event"] == "thread"
+    while (await c.receive_json_from(timeout=10))["event"] not in ("end", "error"):
+        pass
+    await c.disconnect()
+    thread = await Thread.objects.aget(pk=first["data"]["id"])
+    assert thread.tenant == str(workspaces["globex"].pk)

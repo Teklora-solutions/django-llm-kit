@@ -7,6 +7,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 ### Added
 
 - A touchpoint called inside a running agent without a `config` (`complete()`, `acomplete()`, `model()` with `run_config()`) joins that agent's request: recorded in its run tree, counted in its totals, and using its `retry` policy.
+- `TENANT_RESOLVER` may take `request` and `scope`: the HTTP views pass the request and the WebSocket consumer the Channels scope, so a user in several tenants can pick one per request (a header, say). Raising `PermissionDenied` refuses the request (403, or WebSocket close 4403).
 
 ## [0.2.0] - 2026-11-14
 

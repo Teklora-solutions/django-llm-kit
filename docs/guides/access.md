@@ -12,6 +12,30 @@ A thread belongs to a **user**, an anonymous **visitor**, a **key your code chos
 - Staff may open threads that have no user (visitor, keyed or code threads), to inspect them; never another user's.
 - With `TENANT_RESOLVER` (a dotted path to `fn(user) -> tenant`), new threads are stamped with the user's tenant, and a thread from another tenant is refused. The same tenant scopes [model tools](tools.md) and is recorded on every call.
 
+## Users in several tenants
+
+When a user belongs to several workspaces and the client picks one per request (a header, a URL argument, the session), give the resolver a `request` or `scope` parameter. llm-kit passes the Django (or DRF) request from the HTTP views, and the Channels scope from the WebSocket consumer. Outside a request (`agents.run` from a task), both are `None`:
+
+```python
+from django.core.exceptions import PermissionDenied
+
+
+def workspace_for(user, request=None, scope=None):
+    if request is not None:
+        picked = request.headers.get("X-Workspace-Id")
+    elif scope is not None:
+        picked = dict(scope["headers"]).get(b"x-workspace-id", b"").decode()
+    else:
+        picked = None
+    if not picked:
+        return user.default_workspace_id
+    if not Membership.objects.filter(user=user, workspace_id=picked).exists():
+        raise PermissionDenied("Not a member of that workspace.")
+    return int(picked)
+```
+
+The tenant it returns stamps new threads, limits which threads are listed and opened, scopes model tools and is recorded on calls and runs. Raising `PermissionDenied` refuses the request: 403 from the SSE and API views, and close code 4403 from the WebSocket consumer. A resolver that takes only `user` keeps working.
+
 ## Threads your code keys
 
 For conversations that belong to something other than a signed-in user (a WhatsApp number, a ticket, a Celery job). Clients can never pick or look up a key; only your code can:

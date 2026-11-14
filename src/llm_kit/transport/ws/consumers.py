@@ -44,6 +44,11 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         if not access.can_use_api(self.user):
             await self.close(code=CLOSE_UNAUTHORIZED)
             return
+        try:  # a TENANT_RESOLVER that refuses this scope refuses the connection
+            await database_sync_to_async(access.owner_from_scope)(self.scope)
+        except access.NotAllowed:
+            await self.close(code=CLOSE_FORBIDDEN)
+            return
         thread_id = self.scope["url_route"]["kwargs"].get("thread_id")
         if thread_id is not None:
             try:
@@ -95,13 +100,16 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         runs.validate_choice(self.thread.graph, payload.get("model"))
         return False
 
+    def _config(self, payload):
+        return runs.build_config(self.thread, payload, owner=access.owner_from_scope(self.scope))
+
     async def _run(self, payload):
         try:
             created = await self._prepare(payload)
             graph = get_graph(self.thread.graph)
             graph_input = runs.build_input(payload)
             # Sync: TENANT_RESOLVER may query the database.
-            config = await database_sync_to_async(runs.build_config)(self.thread, payload, self.user)
+            config = await database_sync_to_async(self._config)(payload)
         except (UnknownGraph, runs.BadRequest, access.NotAllowed) as e:
             await self.send_event("error", {"message": str(e)})
             return

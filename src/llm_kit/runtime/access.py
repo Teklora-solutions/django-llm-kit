@@ -75,24 +75,41 @@ class Owner:
         return self.session[SESSION_KEY]
 
 
-def owner_for(user=None, session=None, tenant: Any = None) -> Owner:
-    """An ``Owner``; the tenant comes from ``TENANT_RESOLVER`` unless given."""
+def owner_for(user=None, session=None, tenant: Any = None, *, request=None, scope=None) -> Owner:
+    """An ``Owner``; the tenant comes from ``TENANT_RESOLVER`` unless given.
+
+    ``request`` / ``scope`` are passed to a resolver that takes them (a user in several
+    tenants picks one per request, e.g. with a header)."""
     if isinstance(user, Owner):
         return user
     if tenant is None:
         from llm_kit.tools.caller import resolve_tenant
 
-        tenant = resolve_tenant(user)
+        tenant = resolve_tenant(user, request=request, scope=scope)
     return Owner(user=user, session=session, tenant=tenant)
 
 
+_OWNER_ATTR = "_llm_kit_owner"
+
+
 def owner_from_request(request) -> Owner:
-    return owner_for(getattr(request, "user", None), getattr(request, "session", None))
+    """The request's owner, resolved once per request (DRF calls this from several places)."""
+    user = getattr(request, "user", None)
+    raw = getattr(request, "_request", request)  # a DRF Request wraps the HttpRequest
+    cached = getattr(raw, _OWNER_ATTR, None)
+    if cached is not None and cached.user is user:
+        return cached
+    owner = owner_for(user, getattr(request, "session", None), request=request)
+    try:
+        setattr(raw, _OWNER_ATTR, owner)
+    except AttributeError:
+        pass
+    return owner
 
 
 def owner_from_scope(scope) -> Owner:
     """For Channels: the user and session put in the scope by ``AuthMiddlewareStack``."""
-    return owner_for(scope.get("user"), scope.get("session"))
+    return owner_for(scope.get("user"), scope.get("session"), scope=scope)
 
 
 # ------------------------------------------------------------------ checks
@@ -175,7 +192,7 @@ def adopt_session_threads(request, user=None) -> int:
         return 0
     from llm_kit.tools.caller import resolve_tenant
 
-    tenant = resolve_tenant(user)
+    tenant = resolve_tenant(user, request=request)
     moved = Thread.objects.filter(user__isnull=True, session_key=visitor).update(
         user=user, session_key="", tenant="" if tenant is None else str(getattr(tenant, "pk", tenant))
     )

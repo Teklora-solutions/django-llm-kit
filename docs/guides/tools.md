@@ -54,7 +54,7 @@ system_prompt += tools.guidance(bound_tools)       # one usage line per tool
 
 ## The caller is set by the server
 
-Runs started through llm-kit's views carry `Caller(user, tenant)` in the run config. The tenant comes from `TENANT_RESOLVER(user)`. Clients can't set it (every client-sent `configurable` key starting with `__` is dropped), it is never written to checkpoints, and a tool with no caller refuses to run.
+Runs started through llm-kit's views carry `Caller(user, tenant)` in the run config. The tenant comes from `TENANT_RESOLVER(user)` (which may also take the [request](access.md#users-in-several-tenants)). Clients can't set it (every client-sent `configurable` key starting with `__` is dropped), it is never written to checkpoints, and a tool with no caller refuses to run.
 
 ## Scoping
 
