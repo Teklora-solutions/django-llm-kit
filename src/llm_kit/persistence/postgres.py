@@ -59,11 +59,10 @@ async def async_saver(alias: str = "default", max_size: int = 10):
     from asgiref.sync import sync_to_async
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from psycopg.rows import dict_row
-    from psycopg_pool import AsyncConnectionPool
 
     info = await sync_to_async(conninfo)(alias)
     # One pool per event loop, and loops can be short-lived (asyncio.run in a task): start small.
-    pool = AsyncConnectionPool(
+    pool = _loop_pool_class()(
         info, kwargs={**_CONNECTION, "row_factory": dict_row}, min_size=1, max_size=max_size, open=False
     )
     await pool.open()
@@ -71,6 +70,53 @@ async def async_saver(alias: str = "default", max_size: int = 10):
     await saver.setup()
     saver.llm_kit_close = lambda: _finish(pool)
     return saver
+
+
+_LOOP_POOL = None
+
+
+def _loop_pool_class():
+    """``AsyncConnectionPool`` whose worker tasks stop when cancelled.
+
+    psycopg_pool's workers catch ``CancelledError`` raised while they run a job (adding a
+    connection, say) and go back to waiting for the next one. When ``asyncio.run`` ends and
+    cancels the tasks still running, a worker caught mid-job then never ends, and
+    ``asyncio.run`` waits for it forever. These workers check ``Task.cancelling()`` after
+    each job and stop.
+    """
+    global _LOOP_POOL
+    if _LOOP_POOL is not None:
+        return _LOOP_POOL
+    import asyncio
+    import logging
+
+    from psycopg_pool import AsyncConnectionPool
+
+    try:
+        from psycopg_pool.pool_async import StopWorker
+    except ImportError:  # a psycopg_pool without it: its own workers
+        _LOOP_POOL = AsyncConnectionPool
+        return _LOOP_POOL
+
+    logger = logging.getLogger("psycopg.pool")
+
+    class LoopPool(AsyncConnectionPool):
+        @classmethod
+        async def worker(cls, q) -> None:
+            me = asyncio.current_task()
+            while True:
+                job = await q.get()
+                if isinstance(job, StopWorker):
+                    return
+                try:
+                    await job.run()
+                except Exception as ex:
+                    logger.warning("task run %s failed: %s: %s", job, ex.__class__.__name__, ex)
+                if me is not None and me.cancelling():
+                    raise asyncio.CancelledError
+
+    _LOOP_POOL = LoopPool
+    return _LOOP_POOL
 
 
 def _finish(pool) -> None:
