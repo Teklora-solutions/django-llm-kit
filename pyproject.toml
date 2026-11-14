@@ -9,7 +9,7 @@ description = "LangGraph and LangChain for Django: model policies, agents and su
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "Jordan Mwinuka", email = "jordanmwinuka@gmail.com" }]
+authors = [{ name = "Jordan Mwinuka", email = "davidnjihia@teklora.co.ke" }]
 keywords = ["django", "langgraph", "langchain", "llm", "agents", "litellm", "observability"]
 classifiers = [
     "Development Status :: 4 - Beta",
