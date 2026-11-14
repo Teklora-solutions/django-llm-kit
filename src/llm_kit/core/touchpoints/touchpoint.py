@@ -65,6 +65,7 @@ class Touchpoint:
     capture: bool | None = None  # store prompts/responses; None = LLM_KIT["CAPTURE_CONTENT"]
     retry: RetryPolicy | None = None  # waits before falling back; None = LLM_KIT["RETRY"]
     daily_budget: Any = None  # USD per day across all its calls; None = no limit
+    settable: Any = None  # a core.scoped.Settable: what tenants and users may save for it
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -82,7 +83,20 @@ class Touchpoint:
         self, requested: str | None = None, *, config: RunnableConfig | None = None, env: ResolutionEnv | None = None
     ) -> Resolution:
         """Which model(s) a call would use, and why. Raises ``ModelNotAllowed`` / ``TouchpointDisabled``."""
-        return resolve(self, requested if requested is not None else _requested_from(config), env or default_env())
+        return resolve(self, requested if requested is not None else _requested_from(config), self.env_for(config, env))
+
+    def env_for(self, config: RunnableConfig | None = None, env: ResolutionEnv | None = None) -> ResolutionEnv:
+        """The env a call uses: with ``settable``, one that applies what the caller's tenant and
+        user saved (an env with ``for_caller``, as the Django adapter's has)."""
+        env = env or default_env()
+        if self.settable is None:
+            return env
+        for_caller = getattr(env, "for_caller", None)
+        if for_caller is None:
+            return env
+        run = config if config is not None else _running()
+        caller = ((run or {}).get("configurable") or {}).get("__llm_kit_caller")
+        return for_caller(caller) if caller is not None else env
 
     # --------------------------------------------------------------- models
 
@@ -108,6 +122,7 @@ class Touchpoint:
         from llm_kit.core.touchpoints.backends import build_for
 
         check_daily_budget(self)  # BudgetExceeded once today's spend reaches daily_budget
+        env = self.env_for(config, env)
         resolution = self.resolve(requested, config=config, env=env)
         if not fallbacks:
             resolution.fallbacks = []
@@ -287,12 +302,14 @@ def touchpoint(
     capture: bool | None = None,
     retry: RetryPolicy | dict | str | None = None,
     daily_budget: Any = None,
+    settable: Any = None,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads).
 
     ``daily_budget`` (USD) caps what all its calls may spend in a day; past it, ``model()``,
     ``complete()`` and ``embed()`` raise ``BudgetExceeded`` (``DAILY_BUDGETS["touchpoints"]``
-    sets or overrides it without a deploy)."""
+    sets or overrides it without a deploy). ``settable`` (a ``Settable``) lets tenants and users
+    save a model choice and parameters for it (see ``llm_kit.scoped``)."""
     tp = Touchpoint(
         name=name,
         default=default,
@@ -305,6 +322,7 @@ def touchpoint(
         capture=capture,
         retry=retry,
         daily_budget=daily_budget,
+        settable=settable,
     )
     with _lock:
         _registry[name] = tp

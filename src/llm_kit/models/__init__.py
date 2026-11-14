@@ -10,6 +10,7 @@ from llm_kit.models.checkpoints import Checkpoint, CheckpointBlob, CheckpointWri
 from llm_kit.models.credentials import ProviderKey
 from llm_kit.models.monitoring import AlertEvent, AlertRule, MonitoringDashboard
 from llm_kit.models.observability import LLMCall, LLMRun, ToolCall
+from llm_kit.models.scoped import ScopedSetting
 from llm_kit.models.threads import Thread
 from llm_kit.models.tools import ToolProposal
 from llm_kit.models.touchpoints import TouchpointOverride
@@ -30,6 +31,7 @@ __all__ = [
     "LLMRun",
     "MonitoringDashboard",
     "ProviderKey",
+    "ScopedSetting",
     "Thread",
     "ToolCall",
     "ToolProposal",

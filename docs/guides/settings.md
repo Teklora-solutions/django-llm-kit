@@ -1,0 +1,111 @@
+---
+description: Let tenants and users save their own model choice, parameters and settings, within limits you set in code, and show them in your UI through an API or Django templates.
+---
+
+# Settings your users manage
+
+Some choices belong to your customers, not to your code. A workspace might pick the model its assistant uses, and a user might turn its temperature down. You decide which settings exist, who may change them, and what values are allowed. llm-kit stores the values, applies them on every call, and describes them to your UI.
+
+## Scopes
+
+Each saved value belongs to a **scope**. From broadest to narrowest:
+
+| Scope | Whose | Its id comes from |
+|---|---|---|
+| `platform` | yours: every tenant and user | |
+| `tenant` | a workspace and its members | `TENANT_RESOLVER` ([access control](access.md#users-in-several-tenants)) |
+| `user` | one signed-in user | the request's user |
+
+A narrower scope's value wins: a user's choice beats their tenant's, which beats the platform's, which beats your code. A client's explicit choice for one request (`{"model": ...}`) still comes first.
+
+## Model choice and parameters
+
+Declare what may be saved for a touchpoint with `settable`:
+
+```python
+from llm_kit import ClientChoice, Param, Settable, touchpoint
+
+support = touchpoint(
+    "support.chat",
+    default="anthropic/claude-sonnet-5-5",
+    choice=ClientChoice(allow=["anthropic/*", "openai/*"], max_price_output=20),
+    settable=Settable(
+        model=("tenant", "user"),                        # who may save a model choice
+        params={"temperature": Param("number", min=0, max=1, scopes=("user",))},
+    ),
+)
+```
+
+- A saved model is checked like a client's pick: against the touchpoint's `ClientChoice` (allow patterns, `requires`, price caps), an admin's `allow`, and whether there's a key for its provider. If a saved model isn't allowed any more (you narrowed the choice, or the model was hidden), it is ignored and the call uses the default; the resolution's `notes` say why. For a touchpoint that uses `ServerChoice`, `Settable(model_allow=[...])` bounds saved choices instead.
+- Only the params you declare can be saved, each checked against its `Param` (`number`, `integer`, `boolean`, `choice`, `text`; `min`, `max`, `choices`).
+- `Resolution.chosen_by` is `"tenant"` or `"user"` when a saved choice was used, and every call records it.
+
+Saved values apply wherever the caller is known: llm-kit's views and WebSocket consumer, `agents.run(user=...)`, and touchpoint calls made inside a running agent. Code that calls a touchpoint with no caller gets your code's settings.
+
+## Your own settings
+
+Register settings that aren't tied to a touchpoint, and read them anywhere:
+
+```python
+from llm_kit import scoped
+from llm_kit.scoped import Setting
+
+scoped.register(Setting("support.tone", type="choice", choices=["friendly", "formal"], default="friendly",
+                        label="Tone", help="How the assistant writes.", scopes=("tenant", "user")))
+
+tone = scoped.value("support.tone", caller)   # the user's, else the tenant's, else the platform's, else the default
+```
+
+`choices` can be a function `fn(owner) -> [...]` when the options depend on who is asking. Register settings in your app's `ready()` or in the module that declares your touchpoints.
+
+## Who may change what
+
+`LLM_KIT["SCOPE_PERMISSIONS"]` maps a scope to `fn(user, tenant) -> bool`:
+
+```python
+LLM_KIT = {"SCOPE_PERMISSIONS": {"tenant": "myapp.permissions:manages_workspace"}}
+```
+
+Without a function, the defaults are:
+
+- `platform`: users with the `llm_kit.change_scopedsetting` permission (superusers have it).
+- `tenant`: nobody. Say who manages a workspace before tenants can save anything.
+- `user`: the user themselves.
+
+A setting can also limit its own scopes (`scopes=("user",)`), so even a tenant manager can't save it for the whole tenant.
+
+## The settings API
+
+Include `llm_kit.transport.api.urls` (see [streaming and APIs](streaming.md)), then:
+
+```
+GET    llm/api/settings/?scope=user[&touchpoint=support.chat]
+PATCH  llm/api/settings/   {"scope": "tenant", "touchpoint": "support.chat", "key": "model", "value": "openai/gpt-5"}
+DELETE llm/api/settings/   {"scope": "tenant", "touchpoint": "support.chat", "key": "model"}
+```
+
+`GET` returns everything the scope may save, grouped into sections your UI can render as they come:
+
+```json
+{
+  "scope": "user",
+  "editable": true,
+  "sections": [
+    {"touchpoint": "", "title": "General", "settings": [
+      {"key": "support.tone", "type": "choice", "label": "Tone", "value": null,
+       "inherited": {"value": "formal", "scope": "tenant"}, "default": "friendly",
+       "options": ["friendly", "formal"], "editable": true}
+    ]},
+    {"touchpoint": "support.chat", "title": "support.chat", "description": "...", "settings": [
+      {"key": "model", "type": "model", "value": "openai/gpt-5", "inherited": null,
+       "options": [{"value": "anthropic/claude-sonnet-5-5", "label": "Claude Sonnet 5.5",
+                    "price_input": "3", "price_output": "15", "context_window": 1000000}]},
+      {"key": "param.temperature", "type": "number", "min": 0, "max": 1, "value": 0.3}
+    ]}
+  ]
+}
+```
+
+`value` is what this scope saved (null: nothing), and `inherited` is what it gets otherwise. `PATCH` and `DELETE` return the setting's new description. Errors: 400 for a value that isn't allowed, 403 when the requester may not change that scope, and 404 for an unknown setting or a scope the requester doesn't have (no tenant, say). The scope's id always comes from the request, never from the body.
+
+Admins see and edit every saved value under **Scoped settings** in the Django admin.

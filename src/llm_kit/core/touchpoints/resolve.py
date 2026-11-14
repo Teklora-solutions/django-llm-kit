@@ -22,7 +22,7 @@ class Resolution:
     model: str
     fallbacks: list[str]
     params: dict[str, Any]
-    chosen_by: Literal["client", "admin", "code"]
+    chosen_by: Literal["client", "user", "tenant", "admin", "code"]
     requested: str | None = None
     notes: list[str] = field(default_factory=list)  # decisions, in order
     skipped: list[tuple[str, str]] = field(default_factory=list)  # (model, why)
@@ -94,7 +94,10 @@ def resolve(tp: Touchpoint, requested: str | None, env: ResolutionEnv) -> Resolu
     default = (ov.default if ov and ov.default else None) or tp.default
     fallbacks = list(ov.fallbacks) if ov and ov.fallbacks is not None else list(tp.fallbacks)
     params = {**tp.params, **(ov.params if ov else {})}
-    chosen_by: Literal["client", "admin", "code"] = "admin" if ov and ov.default else "code"
+    saved_params = getattr(env, "saved_params", None)
+    if saved_params is not None:
+        params.update(saved_params(tp))  # what the caller's tenant and user saved (declared keys only)
+    chosen_by: Literal["client", "user", "tenant", "admin", "code"] = "admin" if ov and ov.default else "code"
     notes: list[str] = []
     if chosen_by == "admin":
         notes.append(f"admin override sets default to {default}")
@@ -119,6 +122,19 @@ def resolve(tp: Touchpoint, requested: str | None, env: ResolutionEnv) -> Resolu
                 notes.append(f"client requested {req_ref}; allowed")
                 if not choice.use_fallbacks:
                     fallbacks = []
+    elif (saved_model := getattr(env, "saved_model", None)) is not None and (saved := saved_model(tp)):
+        # A model the caller's user or tenant saved: checked like a client's pick, ignored if not allowed.
+        ref, scope = saved
+        req_ref, info = canonical(ref, env)
+        choice = tp.choice if isinstance(tp.choice, ClientChoice) else ClientChoice(allow=tp.settable.model_allow)
+        why = check_client_pick(tp, req_ref, info, choice, ov.allow if ov else None, env)
+        if why:
+            notes.append(f"{scope} saved {req_ref}, not allowed ({'; '.join(why)}); using default")
+        else:
+            primary, chosen_by = req_ref, scope
+            notes.append(f"{scope} saved {req_ref}")
+            if not choice.use_fallbacks:
+                fallbacks = []
 
     # Fallbacks: drop duplicates, models without credentials, and ones failing requires.
     skipped: list[tuple[str, str]] = []

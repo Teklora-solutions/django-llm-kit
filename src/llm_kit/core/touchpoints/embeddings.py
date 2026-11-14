@@ -207,7 +207,7 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
     from llm_kit.core.touchpoints.retry import policy_for
 
     check_daily_budget(tp)
-    env = env or default_env()
+    env = tp.env_for(config_, env or default_env())
     resolution = tp.resolve(requested, config=config_, env=env)
     if not fallbacks:
         resolution.fallbacks = []

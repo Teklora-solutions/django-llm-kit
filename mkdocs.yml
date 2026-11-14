@@ -72,6 +72,7 @@ nav:
       - Checkpointers: guides/checkpointer.md
       - Streaming and APIs: guides/streaming.md
       - Access control: guides/access.md
+      - Settings your users manage: guides/settings.md
       - Testing: guides/testing.md
       - Deployment: guides/deployment.md
   - Reference:
