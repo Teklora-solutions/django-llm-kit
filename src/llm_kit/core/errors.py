@@ -50,3 +50,13 @@ class AllModelsFailed(LLMKitError):
     @property
     def last(self) -> BaseException:
         return self.errors[-1][1]
+
+
+class BudgetExceeded(LLMKitError):
+    """A user's or tenant's spend for today is over ``LLM_KIT["DAILY_BUDGETS"]``: the request
+    is refused before it starts. (A request over its own ``AGENT_BUDGET`` isn't an error: its
+    agents stop with ``stopped="budget"``.)"""
+
+    def __init__(self, scope: str, spent, budget) -> None:
+        self.scope, self.spent, self.budget = scope, spent, budget
+        super().__init__(f"Today's {scope} budget of ${budget} is used up (${spent} spent).")

@@ -18,6 +18,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from llm_kit import conf
+from llm_kit.core.errors import BudgetExceeded
 from llm_kit.models import Thread
 from llm_kit.runtime import access, runs
 from llm_kit.runtime.graphs import UnknownGraph, default_graph_name, get_graph
@@ -98,6 +99,8 @@ async def stream(request, thread_id=None):
         return _error(403, str(e))
     except (UnknownGraph, runs.BadRequest) as e:
         return _error(400, str(e))
+    except BudgetExceeded as e:
+        return _error(429, str(e))
 
     async def events():
         if created:

@@ -5,7 +5,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from llm_kit.core.errors import UnknownTouchpoint
+from llm_kit.core.errors import BudgetExceeded, UnknownTouchpoint
 from llm_kit.core.touchpoints import all_touchpoints, get_touchpoint
 from llm_kit.models import Thread
 from llm_kit.runtime import access, runs
@@ -76,6 +76,8 @@ class ThreadViewSet(viewsets.ModelViewSet):
             config = runs.build_config(thread, payload, owner=access.owner_from_request(request))
         except runs.BadRequest as e:
             raise ValidationError({"detail": str(e)}) from e
+        except BudgetExceeded as e:
+            return Response({"detail": str(e)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
         state = runs.invoke_run(get_graph(thread.graph), graph_input, config)
         thread.save(update_fields=["updated_at"])
         return Response(state, status=status.HTTP_200_OK)

@@ -53,7 +53,7 @@ logger = logging.getLogger("llm_kit.agents")
 class AgentState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     output: Any  # the final answer in the agent's ``output`` shape (JSON), if it has one
-    stopped: str  # "" while working or done; max_steps | timeout | paused
+    stopped: str  # "" while working or done; max_steps | timeout | budget | paused
     loaded_tools: Annotated[list[str], union]  # with defer_tools: the tools found so far
 
 
@@ -138,6 +138,11 @@ def _stop_for(spec: AgentSpec, config) -> dict | None:
     tree = tree_of(config)
     if tree is not None and tree.timed_out:
         return {"messages": [_synthetic("Stopped: this request ran out of time.")], "stopped": "timeout"}
+    if tree is not None and tree.over_budget:
+        return {
+            "messages": [_synthetic(f"Stopped: this request reached its budget of ${tree.budget}.")],
+            "stopped": "budget",
+        }
     return None
 
 

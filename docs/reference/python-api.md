@@ -29,7 +29,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.agents`
 
-`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
+`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
 
 ## `llm_kit.tools`
 

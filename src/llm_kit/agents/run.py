@@ -13,6 +13,10 @@ the request's tree, and its messages forwarded to the request's stream. Pass
 
 ``retry`` sets how long this run's model calls wait out a short rate limit before
 falling back (a ``RetryPolicy``, a dict, or ``"batch"``/``"interactive"``/``"never"``).
+
+``budget`` (USD) caps what the request may spend; its agents stop with ``stopped="budget"``
+when it is reached (default ``LLM_KIT["AGENT_BUDGET"]``). A new request is refused with
+``BudgetExceeded`` when its user or tenant is over ``LLM_KIT["DAILY_BUDGETS"]``.
 """
 
 from __future__ import annotations
@@ -112,7 +116,16 @@ def _nested_config(parent: dict, name: str, *, user, tenant, thread_id, throwawa
 
 
 def _config(
-    name: str, *, user=None, tenant: Any = None, thread_id=None, thread=None, join=True, retry=None, **extra
+    name: str,
+    *,
+    user=None,
+    tenant: Any = None,
+    thread_id=None,
+    thread=None,
+    join=True,
+    retry=None,
+    budget=None,
+    **extra,
 ) -> tuple[dict, bool]:
     throwaway = thread is None and thread_id is None
     user, tenant, thread_id = _from_thread(name, thread, user, tenant, thread_id)
@@ -123,21 +136,28 @@ def _config(
         extra["configurable"] = {**(extra.get("configurable") or {}), RETRY_KEY: RetryPolicy.coerce(retry)}
     parent = running_parent() if join else None
     if parent is not None:
+        if budget is not None:
+            from llm_kit.core.errors import ConfigError
+
+            raise ConfigError("budget= applies to a whole request; a run inside one shares its budget (or join=False).")
         return _nested_config(
             parent, name, user=user, tenant=tenant, thread_id=thread_id, throwaway=throwaway, extra=extra
         ), True
 
+    from llm_kit.core.agents.limits import TREE_KEY, Tree
     from llm_kit.core.observability.handler import get_handler
+    from llm_kit.observability.budgets import check_daily
     from llm_kit.tools.caller import _UNSET, CONFIG_KEY, caller_for
 
     spec = get_agent(name)
     caller = caller_for(user, _UNSET if tenant is None else tenant)
+    check_daily(caller)
     metadata = {"llm_kit_graph": spec.name}
     if caller.is_authenticated:
         metadata["user_id"] = str(caller.user_id)
     if caller.tenant_id is not None:
         metadata["tenant"] = str(caller.tenant_id)
-    configurable = {CONFIG_KEY: caller, **(extra.pop("configurable", None) or {})}
+    configurable = {CONFIG_KEY: caller, TREE_KEY: Tree.new(budget), **(extra.pop("configurable", None) or {})}
     if throwaway:  # nothing will continue it: keep its state (and its subagents') in memory
         from llm_kit.core.agents.limits import EPHEMERAL_KEY
 
@@ -183,6 +203,7 @@ def run(
     thread=None,
     join: bool = True,
     retry: Any = None,
+    budget: Any = None,
     **config,
 ) -> AgentResult:
     """Run agent ``name`` on ``task`` to the end. ``thread`` or ``thread_id`` continues a conversation.
@@ -191,7 +212,15 @@ def run(
     ends. The result, and the recorded calls and runs, are kept.
     """
     cfg, nested = _config(
-        name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, join=join, retry=retry, **config
+        name,
+        user=user,
+        tenant=tenant,
+        thread_id=thread_id,
+        thread=thread,
+        join=join,
+        retry=retry,
+        budget=budget,
+        **config,
     )
     try:
         with _detached(nested):
@@ -214,10 +243,19 @@ async def arun(
     thread=None,
     join: bool = True,
     retry: Any = None,
+    budget: Any = None,
     **config,
 ) -> AgentResult:
     cfg, nested = await sync_to_async(_config, thread_sensitive=True)(
-        name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, join=join, retry=retry, **config
+        name,
+        user=user,
+        tenant=tenant,
+        thread_id=thread_id,
+        thread=thread,
+        join=join,
+        retry=retry,
+        budget=budget,
+        **config,
     )
     try:
         with _detached(nested):
@@ -239,6 +277,7 @@ async def stream(
     thread_id: str | None = None,
     thread=None,
     retry: Any = None,
+    budget: Any = None,
     **config,
 ) -> AsyncIterator[dict]:
     """llm-kit events (``token``, ``message``, ``update``, ``end``, ``error``) as the agent works.
@@ -250,7 +289,15 @@ async def stream(
     from llm_kit.runtime.graphs import get_graph
 
     cfg, nested = await sync_to_async(_config, thread_sensitive=True)(
-        name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, join=False, retry=retry, **config
+        name,
+        user=user,
+        tenant=tenant,
+        thread_id=thread_id,
+        thread=thread,
+        join=False,
+        retry=retry,
+        budget=budget,
+        **config,
     )
     try:
         graph = get_graph(name, ephemeral=thread is None and thread_id is None)

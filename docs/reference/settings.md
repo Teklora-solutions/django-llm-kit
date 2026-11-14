@@ -52,6 +52,8 @@ LLM_KIT = {
 | `AGENT_MAX_DEPTH` | `2` | how deep subagents may nest (`0`: no delegation) |
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
+| `AGENT_BUDGET` | `None` | USD a request may spend; then its agents stop with `stopped="budget"` (per run: `agents.run(budget=)`; [budgets](../guides/agents.md#budgets)) |
+| `DAILY_BUDGETS` | `{}` | USD per day for `"user"` and `"tenant"`, from recorded calls; a request over it is refused (429) |
 
 ## Recording and monitoring
 
