@@ -40,7 +40,16 @@ support = touchpoint(
 - Only the params you declare can be saved, each checked against its `Param` (`number`, `integer`, `boolean`, `choice`, `text`; `min`, `max`, `choices`).
 - `Resolution.chosen_by` is `"tenant"` or `"user"` when a saved choice was used, and every call records it.
 
-Saved values apply wherever the caller is known: llm-kit's views and WebSocket consumer, `agents.run(user=...)`, and touchpoint calls made inside a running agent. Code that calls a touchpoint with no caller gets your code's settings.
+Saved values apply wherever the caller is known: llm-kit's views and WebSocket consumer, `agents.run(user=...)`, and touchpoint calls made inside a running agent. Elsewhere, such as a Celery task or your own view, say who a call is for with `caller=`. It takes a `Caller`, an `Owner` or a user:
+
+```python
+from llm_kit.tools import caller_for
+
+vectors = search.embed(chunks, caller=caller_for(document.owner, tenant=document.workspace))
+summary = digest.complete(text, caller=request.user)
+```
+
+Their saved settings, keys and budgets then apply, and the call is recorded with their user and tenant. Passing `config={"configurable": {"__llm_kit_caller": caller}}` does the same. Code that calls a touchpoint with no caller gets your code's settings.
 
 ## Your own settings
 

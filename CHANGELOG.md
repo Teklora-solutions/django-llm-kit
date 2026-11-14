@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- `caller=` on `model()`, `complete()`, `acomplete()`, `embed()` and `aembed()`: who a call outside a request or agent run is for. Their saved settings, keys and budgets apply, and the call records their user and tenant. A caller given in `config` is now recorded too (#24).
+
 - Testing provider keys: one tiny call with the key alone, with the result stored on the key (migration 0015). Available as `POST llm/api/keys/<id>/test/`, `verify` when adding a key (a refused key isn't saved), a Test button in the keys template, and an admin action.
 
 - The example project has a `/settings/` page built from the settings templates.

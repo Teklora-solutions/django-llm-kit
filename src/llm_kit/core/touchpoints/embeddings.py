@@ -215,6 +215,7 @@ class _Call:
     resolution: Any
     params: dict[str, Any]
     owners: list[str] = None  # whose keys each attempt uses
+    run: dict | None = None  # the call's config (or the running agent's), for who it is for
 
 
 def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) -> tuple[_Call, list[Any]]:
@@ -245,7 +246,7 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
 
         raise no_key(tp, resolution.candidates)
     run = config_ if config_ is not None else _running()
-    call = _Call(tp, refs, embedders, policy_for(tp, run, retry), resolution, merged, owners)
+    call = _Call(tp, refs, embedders, policy_for(tp, run, retry), resolution, merged, owners, run)
     return call, _inputs(inputs)
 
 
@@ -323,9 +324,15 @@ def _start(call: _Call, ref: str, index: int, inputs: list[Any], owner: str = "p
     from llm_kit.core.observability.context import current
     from llm_kit.core.observability.handler import _hash
     from llm_kit.core.observability.records import CallRecord
+    from llm_kit.core.touchpoints.touchpoint import CALLER_KEY, caller_ids
 
     parent = _running() or {}
-    meta, ctx = parent.get("metadata") or {}, current()
+    meta, ctx = dict(parent.get("metadata") or {}), current()
+    caller = ((call.run or {}).get("configurable") or {}).get(CALLER_KEY)
+    if caller is not None:  # a call made for someone outside an agent run (config or caller=)
+        user_id, tenant = caller_ids(caller)
+        meta.setdefault("user_id", user_id)
+        meta.setdefault("tenant", tenant)
     rec = CallRecord(
         call_id=str(uuid.uuid4()),
         run_id=_root_run(parent),
