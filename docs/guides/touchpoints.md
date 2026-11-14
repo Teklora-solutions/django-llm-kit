@@ -121,7 +121,7 @@ vectors = search.embed(["first passage", "second passage"])    # list[list[float
 - Fallbacks only make sense between models with the same output size: vectors from different models can't be compared. Pin `dimensions`, or use `fallbacks=False` for a call whose vectors go into an existing index.
 - Inside a running agent, the call is recorded in its run and counts towards its [budget](agents.md#budgets).
 
-Embeddings have their own backend setting, `LLM_KIT["EMBEDDING_BACKEND"]`:
+Embeddings have their own backend setting, `LLM_KIT["EMBEDDING_BACKEND"]`. One touchpoint can use another backend: `touchpoint(..., backend=...)` applies to `embed()` too, so a touchpoint used only for embeddings can name its embedder there. Use `embedding_backend=` for a touchpoint that both chats and embeds with different backends. Each of these can be a name, a dotted path or the factory itself:
 
 | Backend | How embeddings are made |
 |---|---|
