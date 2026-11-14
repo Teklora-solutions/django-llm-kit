@@ -1,0 +1,1 @@
+<input type="text" id="llm-kit-{{ setting.touchpoint|slugify }}-{{ setting.key|slugify }}" name="value" value="{{ setting.value|default_if_none:'' }}"{% if not setting.editable %} disabled{% endif %}>

@@ -1,0 +1,4 @@
+<select id="llm-kit-{{ setting.touchpoint|slugify }}-{{ setting.key|slugify }}" name="value"{% if not setting.editable %} disabled{% endif %}>
+  <option value=""{% if setting.value is None %} selected{% endif %}>—</option>
+  {% for option in setting.options %}<option value="{{ option.value }}"{% if option.value == setting.value %} selected{% endif %}>{{ option.label }}{% if option.price_input %} (${{ option.price_input }} / ${{ option.price_output }} per 1M tokens){% endif %}</option>{% endfor %}
+</select>

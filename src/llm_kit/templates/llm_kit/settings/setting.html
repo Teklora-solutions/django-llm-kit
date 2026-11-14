@@ -1,0 +1,17 @@
+<form class="llm-kit-setting" method="post" action="{% url 'llm_kit:settings-save' %}" data-key="{{ setting.key }}">
+  <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
+  <input type="hidden" name="scope" value="{{ scope }}">
+  <input type="hidden" name="touchpoint" value="{{ setting.touchpoint }}">
+  <input type="hidden" name="key" value="{{ setting.key }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label for="llm-kit-{{ setting.touchpoint|slugify }}-{{ setting.key|slugify }}">{{ setting.label }}</label>
+  {% with "llm_kit/settings/fields/"|add:setting.type|add:".html" as field %}{% include field %}{% endwith %}
+  {% if setting.help %}<small class="llm-kit-help">{{ setting.help }}</small>{% endif %}
+  {% if setting.value is None %}
+    <small class="llm-kit-inherited">{% if setting.inherited %}Using the {{ setting.inherited.scope }}'s: {{ setting.inherited.value }}{% elif setting.default is not None %}Default: {{ setting.default }}{% else %}Not set{% endif %}</small>
+  {% endif %}
+  {% if setting.editable %}
+    <button type="submit">Save</button>
+    {% if setting.value is not None %}<button type="submit" name="clear" value="1">Use {% if setting.inherited %}the {{ setting.inherited.scope }}'s{% else %}the default{% endif %}</button>{% endif %}
+  {% endif %}
+</form>
