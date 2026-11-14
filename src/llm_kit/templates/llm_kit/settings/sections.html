@@ -1,0 +1,10 @@
+{# Settings a scope may save. Override llm_kit/settings/section.html, setting.html or fields/<type>.html to restyle. #}
+<div class="llm-kit-settings" data-scope="{{ scope }}">
+{% if not available %}
+  <p class="llm-kit-empty">There are no {{ scope }} settings for you here.</p>
+{% else %}
+  {% for section in sections %}{% include "llm_kit/settings/section.html" %}{% empty %}
+  <p class="llm-kit-empty">Nothing to set.</p>
+  {% endfor %}
+{% endif %}
+</div>

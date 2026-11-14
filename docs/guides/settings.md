@@ -4,7 +4,7 @@ description: Let tenants and users save their own model choice, parameters and s
 
 # Settings your users manage
 
-Some choices belong to your customers, not to your code. A workspace might pick the model its assistant uses, and a user might turn its temperature down. You decide which settings exist, who may change them, and what values are allowed. llm-kit stores the values, applies them on every call, and describes them to your UI.
+Some choices belong to your customers, not to your code. A workspace might pick the model its assistant uses, and a user might turn its temperature down. You decide which settings exist, who may change them, and what values are allowed. llm-kit stores the values, applies them on every call, and describes them to your UI, through a [JSON API](#the-settings-api) or [Django templates](#django-templates).
 
 ## Scopes
 
@@ -188,3 +188,24 @@ DELETE llm/api/settings/   {"scope": "tenant", "touchpoint": "support.chat", "ke
 `value` is what this scope saved (null: nothing), and `inherited` is what it gets otherwise. `PATCH` and `DELETE` return the setting's new description. Errors: 400 for a value that isn't allowed, 403 when the requester may not change that scope, and 404 for an unknown setting or a scope the requester doesn't have (no tenant, say). The scope's id always comes from the request, never from the body.
 
 Admins see and edit every saved value under **Scoped settings** in the Django admin.
+
+## Django templates
+
+The same sections as server-rendered forms, for pages you build with Django templates. They post to llm-kit's views (included with `llm_kit.transport.sse.urls`), which save through the same checks as the API and redirect back with a message:
+
+```django
+{% load llm_kit %}
+
+<h2>Workspace AI settings</h2>
+{% llm_kit_settings scope="tenant" %}
+{% llm_kit_keys scope="tenant" %}
+{% llm_kit_budgets scope="member" %}
+
+<h2>Mine</h2>
+{% llm_kit_settings scope="user" touchpoint="support.chat" %}
+```
+
+- The tags need `request` in the template context (`django.template.context_processors.request`) and use the CSRF token. Messages appear if `django.contrib.messages` is installed.
+- Someone who may not change a scope sees its values with the inputs disabled. Someone who doesn't have the scope (no tenant, say) sees a short note.
+- The HTML is plain and has no classes beyond `llm-kit-*` hooks, so your CSS styles it. To change the markup, override any template in your project: `llm_kit/settings/sections.html`, `section.html`, `setting.html`, `fields/<type>.html` (`text`, `number`, `integer`, `boolean`, `choice`, `model`), `keys.html` and `budgets.html`.
+

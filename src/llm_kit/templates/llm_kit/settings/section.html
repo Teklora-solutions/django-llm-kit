@@ -1,0 +1,5 @@
+<section class="llm-kit-section" data-touchpoint="{{ section.touchpoint }}">
+  <h3>{{ section.title }}</h3>
+  {% if section.description %}<p class="llm-kit-description">{{ section.description }}</p>{% endif %}
+  {% for setting in section.settings %}{% include "llm_kit/settings/setting.html" %}{% endfor %}
+</section>

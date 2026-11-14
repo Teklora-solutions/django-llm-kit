@@ -1,0 +1,5 @@
+<select id="llm-kit-{{ setting.touchpoint|slugify }}-{{ setting.key|slugify }}" name="value"{% if not setting.editable %} disabled{% endif %}>
+  <option value=""{% if setting.value is None %} selected{% endif %}>—</option>
+  <option value="true"{% if setting.value is True %} selected{% endif %}>Yes</option>
+  <option value="false"{% if setting.value is False %} selected{% endif %}>No</option>
+</select>

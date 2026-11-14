@@ -1,0 +1,1 @@
+<input type="number" step="any" id="llm-kit-{{ setting.touchpoint|slugify }}-{{ setting.key|slugify }}" name="value" value="{{ setting.value|default_if_none:'' }}"{% if setting.min is not None %} min="{{ setting.min }}"{% endif %}{% if setting.max is not None %} max="{{ setting.max }}"{% endif %}{% if not setting.editable %} disabled{% endif %}>
