@@ -61,11 +61,14 @@ def start(agent: str, task: str, config, limits: dict[str, Any]) -> dict[str, An
         metadata={"parent_thread": str(parent.pk)},
     )
     parent_run = limits.get("parent_run") or ""
+    from llm_kit.core.hooks import context_of
+
     try:
         run = background.start(
             child,
             {"message": task},
             access.Owner(user=user, tenant=tenant),
+            context=context_of(config),  # the parent run's server-set context carries over
             links={
                 "parent_thread": parent,
                 "parent_run_id": uuid.UUID(parent_run) if parent_run else None,
@@ -178,6 +181,7 @@ def report_to_parent(sender, run: BackgroundRun, status: str, error: str = "", *
             access.Owner(user=run.user, tenant=run.tenant or None),
             queue=True,
             links={"reports_on": run},
+            context=run.context,  # e.g. which channel the answer goes back on
         )
     except Exception:
         logger.exception("Could not report background task %s to thread %s", run.run_id, parent.pk)

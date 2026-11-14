@@ -89,6 +89,10 @@ def touchpoint_name(graph: str) -> str | None:
     return registry.touchpoint_name(graph)
 
 
+def prepare_hook(graph: str):
+    return registry.prepare_hook(graph)
+
+
 def get_graph(name: str | None = None, *, ephemeral: bool = False) -> Pregel:
     """Return the compiled graph registered as ``name`` (cached per process).
 

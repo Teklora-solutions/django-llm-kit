@@ -178,6 +178,31 @@ def config_for(name: str, *, user=None, tenant: Any = None, thread_id: str | Non
     return _config(name, user=user, tenant=tenant, thread_id=thread_id, thread=thread, **extra)[0]
 
 
+def _hooks(name: str, task: str, cfg: dict, thread, nested: bool, context=None):
+    """The run hooks for a run started from code (a run inside another's request already had them)."""
+    if nested:
+        return None
+    from langchain_core.messages import HumanMessage
+
+    from llm_kit.core.hooks import check_context, prepare
+    from llm_kit.runtime import access
+    from llm_kit.runtime.graphs import prepare_hook
+    from llm_kit.tools.caller import caller_from
+
+    caller = caller_from(cfg)
+    owner = access.Owner(user=getattr(caller, "user", None), tenant=getattr(caller, "tenant", None))
+    return prepare(
+        name,
+        {"messages": [HumanMessage(content=task)]},
+        cfg,
+        payload={"message": task},
+        owner=owner,
+        thread=thread,
+        graph_hook=prepare_hook(name),
+        context=check_context(context),
+    )
+
+
 def _forget(cfg: dict, nested: bool) -> None:
     """Free a throwaway run's in-memory state: its thread and every subagent thread it started.
 
@@ -204,12 +229,16 @@ def run(
     join: bool = True,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AgentResult:
     """Run agent ``name`` on ``task`` to the end. ``thread`` or ``thread_id`` continues a conversation.
 
     Without either, the run is throwaway: its saved state (and its subagents') is deleted when it
     ends. The result, and the recorded calls and runs, are kept.
+
+    ``context``: facts only your server knows, for the run hooks (``run.context``): a small JSON
+    object. A run inside another agent's request has that request's context.
     """
     cfg, nested = _config(
         name,
@@ -223,8 +252,11 @@ def run(
         **config,
     )
     try:
-        with _detached(nested):
-            result = runner.run(name, task, config=cfg, nested=nested)
+        setup = _hooks(name, task, cfg, thread, nested, context)
+        from llm_kit.core.hooks import entered
+
+        with _detached(nested), entered(setup.contexts if setup else ()):
+            result = runner.run(name, task, config=cfg, nested=nested, input=setup.input if setup else None)
     finally:
         if thread is None and thread_id is None:
             _forget(cfg, nested)
@@ -244,6 +276,7 @@ async def arun(
     join: bool = True,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AgentResult:
     cfg, nested = await sync_to_async(_config, thread_sensitive=True)(
@@ -258,8 +291,12 @@ async def arun(
         **config,
     )
     try:
-        with _detached(nested):
-            result = await runner.arun(name, task, config=cfg, nested=nested)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, nested, context)
+        from llm_kit.core.hooks import aentered
+
+        async with aentered(setup.contexts if setup else ()):
+            with _detached(nested):
+                result = await runner.arun(name, task, config=cfg, nested=nested, input=setup.input if setup else None)
     finally:
         if thread is None and thread_id is None:
             await sync_to_async(_forget)(cfg, nested)
@@ -278,13 +315,12 @@ async def stream(
     thread=None,
     retry: Any = None,
     budget: Any = None,
+    context: dict | None = None,
     **config,
 ) -> AsyncIterator[dict]:
     """llm-kit events (``token``, ``message``, ``update``, ``end``, ``error``) as the agent works.
     Subagents' tokens arrive too, with ``agent`` and ``depth`` set. A stream is always its own
     request (it never joins a running agent)."""
-    from langchain_core.messages import HumanMessage
-
     from llm_kit.core.runs import astream_run
     from llm_kit.runtime.graphs import get_graph
 
@@ -301,9 +337,10 @@ async def stream(
     )
     try:
         graph = get_graph(name, ephemeral=thread is None and thread_id is None)
+        setup = await sync_to_async(_hooks, thread_sensitive=True)(name, task, cfg, thread, False, context)
         # Only touch the context when there is a parent to hide (the generator may be resumed elsewhere).
         with _detached(running_parent() is None):
-            async for event in astream_run(graph, {"messages": [HumanMessage(content=task)]}, cfg):
+            async for event in astream_run(graph, setup.input, setup.config, setup.contexts):
                 yield event
     finally:
         if thread is None and thread_id is None:
@@ -322,6 +359,7 @@ def start(
     thread=None,
     model: str | None = None,
     queue: bool | None = None,
+    context: dict | None = None,
 ):
     """Start agent ``name`` on ``task`` in the background and return the ``BackgroundRun`` at once.
 
@@ -350,7 +388,7 @@ def start(
     payload: dict[str, Any] = {"message": task}
     if model is not None:
         payload["model"] = model
-    return background.start(thread, payload, owner, queue=queue)
+    return background.start(thread, payload, owner, queue=queue, context=context)
 
 
 async def astart(name: str, task: str, **kwargs):

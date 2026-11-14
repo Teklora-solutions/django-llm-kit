@@ -24,6 +24,7 @@ on this connection, but never a background run: it carries on, and can be watche
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 
 from channels.db import database_sync_to_async
@@ -33,6 +34,8 @@ from llm_kit.core.errors import BudgetExceeded
 from llm_kit.models import Thread
 from llm_kit.runtime import access, runs
 from llm_kit.runtime.graphs import UnknownGraph, default_graph_name, get_graph
+
+logger = logging.getLogger("llm_kit")
 
 CLOSE_UNAUTHORIZED = 4401
 CLOSE_FORBIDDEN = 4403
@@ -157,8 +160,8 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         runs.validate_choice(self.thread.graph, payload.get("model"))
         return False
 
-    def _config(self, payload):
-        return runs.build_config(self.thread, payload, owner=access.owner_from_scope(self.scope))
+    def _setup(self, payload):
+        return runs.prepare(self.thread, payload, owner=access.owner_from_scope(self.scope))
 
     async def _run(self, payload):
         try:
@@ -176,16 +179,19 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                 await self.send_event("busy", {"message": str(RunBusy(busy)), "run": busy.to_json()})
                 return
             graph = get_graph(self.thread.graph)
-            graph_input = runs.build_input(payload)
-            # Sync: TENANT_RESOLVER may query the database.
-            config = await database_sync_to_async(self._config)(payload)
-        except (UnknownGraph, runs.BadRequest, access.NotAllowed, BudgetExceeded) as e:
+            # Sync: TENANT_RESOLVER and run hooks may query the database.
+            setup = await database_sync_to_async(self._setup)(payload)
+        except (UnknownGraph, runs.BadRequest, access.NotAllowed, BudgetExceeded, runs.RunRefused) as e:
             await self.send_event("error", {"message": str(e)})
+            return
+        except runs.HookFailed as e:
+            logger.exception("Run hook failed for thread %s", self.thread.pk)
+            await self.send_event("error", {"message": runs.error_message(e)})
             return
         if created:
             await self.send_event("thread", {"id": self.thread.thread_id, "graph": self.thread.graph})
         last = None
-        async for item in runs.astream_run(graph, graph_input, config):
+        async for item in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
             if last is not None:
                 await self.send_event(last["event"], last["data"])
             last = item

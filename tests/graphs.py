@@ -220,3 +220,27 @@ gated_builder = StateGraph(MessagesState)
 gated_builder.add_node("model", gated_model)
 gated_builder.add_edge(START, "model")
 gated_builder.add_edge("model", END)
+
+
+# --- a graph that shows what run hooks set: state, configurable and a ContextVar
+
+from contextvars import ContextVar  # noqa: E402
+
+CHANNEL: ContextVar = ContextVar("llm_kit_test_channel", default=None)
+HOOKED_CALLS: list = []
+
+
+class HookedState(MessagesState):
+    audience: str
+
+
+def hooked_node(state: HookedState, config):
+    scope = (config.get("configurable") or {}).get("__test_scope")
+    HOOKED_CALLS.append(state.get("audience"))
+    return {"messages": [AIMessage(content=f"{state.get('audience')}|{CHANNEL.get()}|{scope}")]}
+
+
+hooked_builder = StateGraph(HookedState)
+hooked_builder.add_node("answer", hooked_node)
+hooked_builder.add_edge(START, "answer")
+hooked_builder.add_edge("answer", END)

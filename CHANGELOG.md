@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Run hooks: `RUN_HOOKS` and `GRAPHS[name]["prepare"]` name functions called before every run, in the process that runs it: SSE, REST, WebSocket, background runs (in the worker, from the saved payload and owner) and `agents.run`/`arun`/`stream`. A hook sets server-only state (merged over the client's input), `configurable` keys and callbacks, and returns context managers entered around the whole run. `RunRefused` refuses a run (403); any other error fails it cleanly before it starts. Server-set `context=` (on `background.start`, `agents.run`/`arun`/`stream`/`start` and `runtime.runs.prepare`) reaches hooks as `run.context` and tools through `context_of(config)`. It is never set from a request, and is saved with background runs (migration 0019).
+
 - Provider readiness: `monitoring.readiness()` and `GET llm/api/monitoring/readiness/` list every provider your touchpoints are configured with (defaults and fallbacks, after overrides), including ones that have never had a call. Each says whether credentials are present, where they come from (`CREDENTIALS`, database, environment, or none needed) and how stored keys did in their last test, without returning secrets. Touchpoints get `ready` and `failover_ready` (#33).
 
 - Background subagents: `agent(..., background_subagents=True | [names])` gives `delegate` a `background` argument. The subagent starts as a `BackgroundRun` linked to the parent (`parent_thread`, `parent_run_id`, recorded under the parent's run) with the request's remaining hand-offs, depth and budget. The parent gets a task id at once. When the task finishes, its answer is queued on the parent's thread as a message, so the parent agent tells the user. `check_task` and `cancel_task` tools follow or stop the thread's tasks (migration 0018).
@@ -49,6 +51,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- The SSE views read each event in a new task, so a ContextVar set during a run didn't reliably reach its later steps. They now read the whole run in one task.
 - Budget totals started at $0 recorded spend for up to 30 s on a freshly booted host (monotonic time under the refresh interval made a never-read total look fresh).
 - A tenant member could read another member's own budget and spend (`GET llm/api/budgets/?scope=member&member=<id>`). Seeing someone else's member budget now needs the same permission as setting it.
 - `embed()` ignored a touchpoint's dotted-path or callable `backend=` and fell back to `EMBEDDING_BACKEND`. It now uses `touchpoint(embedding_backend=)`, then `backend=`, then the setting. A factory that returns a chat model raises an error that names it (#17).

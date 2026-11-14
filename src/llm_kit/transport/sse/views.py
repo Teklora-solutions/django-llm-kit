@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from asgiref.sync import sync_to_async
@@ -29,37 +30,56 @@ from llm_kit.models import Thread
 from llm_kit.runtime import access, runs
 from llm_kit.runtime.graphs import UnknownGraph, default_graph_name, get_graph
 
+logger = logging.getLogger("llm_kit")
+
 
 def sse(event: str, data) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+_DONE = object()
+
+
 async def with_keepalive(events: AsyncIterator[dict], interval: float) -> AsyncIterator[str]:
-    """Format events as SSE, emitting a comment line when the run is quiet."""
-    it = events.__aiter__()
-    pending: asyncio.Future | None = None
+    """Format events as SSE, emitting a comment line when the run is quiet.
+
+    The events are read by one task from start to end, so the run keeps one context: a
+    ContextVar a run hook sets stays set for the whole run, and is reset where it was set."""
+    queue: asyncio.Queue = asyncio.Queue(maxsize=64)  # a slow client slows the run, not memory
+
+    async def pump():
+        it = events.__aiter__()
+        try:
+            async for item in it:
+                await queue.put(item)
+            await queue.put(_DONE)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as e:  # handed to the reader, which raises it
+            await queue.put(e)
+        finally:
+            if hasattr(it, "aclose"):
+                with contextlib.suppress(BaseException):
+                    await it.aclose()  # closed in this task, the one that started it
+
+    task = asyncio.create_task(pump())
     try:
         while True:
-            if pending is None:
-                pending = asyncio.ensure_future(it.__anext__())
-            done, _ = await asyncio.wait({pending}, timeout=interval or None)
-            if not done:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=interval or None)
+            except TimeoutError:
                 yield ": keepalive\n\n"
                 continue
-            try:
-                item = pending.result()
-            except StopAsyncIteration:
+            if item is _DONE:
                 return
-            finally:
-                pending = None
+            if isinstance(item, BaseException):
+                raise item
             yield sse(item["event"], item["data"])
     finally:
-        if pending is not None:
-            pending.cancel()  # the client left mid-read: let that read finish before closing
-            with contextlib.suppress(BaseException):
-                await pending
-        if hasattr(it, "aclose"):
-            await it.aclose()
+        if not task.done():
+            task.cancel()  # the client left: stop the run's stream (a background run carries on)
+        with contextlib.suppress(BaseException):
+            await task
 
 
 def _error(status: int, message: str) -> JsonResponse:
@@ -100,6 +120,7 @@ async def stream(request, thread_id=None):
 
     queue = body.pop("queue", None)
     detached = body.pop("background", False) is True or queue is True
+    failed = None  # a run hook that failed: the stream says so instead of running
     try:
         thread, created, owner = await sync_to_async(_resolve_thread)(thread_id, request, body)
         if detached:
@@ -108,11 +129,14 @@ async def stream(request, thread_id=None):
             if (busy := await sync_to_async(_active_run)(thread)) is not None:
                 raise background.RunBusy(busy)
             graph = get_graph(thread.graph)
-            payload_input = runs.build_input(body)
-            config = await sync_to_async(runs.build_config)(thread, body, owner=owner)
+            try:
+                setup = await sync_to_async(runs.prepare)(thread, body, owner=owner)
+            except runs.HookFailed as e:
+                logger.exception("Run hook failed for thread %s", thread.pk)
+                failed = runs.error_message(e)
     except Thread.DoesNotExist:
         return _error(404, "Thread not found.")
-    except access.NotAllowed as e:
+    except (access.NotAllowed, runs.RunRefused) as e:
         return _error(403, str(e))
     except (UnknownGraph, runs.BadRequest) as e:
         return _error(400, str(e))
@@ -135,7 +159,10 @@ async def stream(request, thread_id=None):
     async def events():
         if created:
             yield {"event": "thread", "data": {"id": thread.thread_id, "graph": thread.graph}}
-        async for item in runs.astream_run(graph, payload_input, config):
+        if failed is not None:
+            yield {"event": "error", "data": {"message": failed}}
+            return
+        async for item in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
             yield item
         await Thread.objects.filter(pk=thread.pk).aupdate(updated_at=timezone.now())
         await background.aadvance(thread)  # a run queued meanwhile may start now

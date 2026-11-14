@@ -24,12 +24,17 @@ from typing import Any
 
 from llm_kit import conf  # noqa: F401  (wires settings.LLM_KIT into the core config)
 from llm_kit.core.errors import BadRequest, LLMKitError
+from llm_kit.core.hooks import HookFailed, RunRefused, RunSetup
 from llm_kit.core.runs import astream_run, build_input, error_message, invoke_run
 from llm_kit.core.runs import build_config as _build_config
 from llm_kit.core.serialize import message_text, message_to_json, state_to_json, to_json
 
 __all__ = [
     "BadRequest",
+    "HookFailed",
+    "RunRefused",
+    "RunSetup",
+    "prepare",
     "astream_run",
     "build_config",
     "build_input",
@@ -72,6 +77,32 @@ def build_config(thread, payload: dict[str, Any], user=None, *, owner=None) -> d
 
         config = root_config(get_agent(thread.graph), config)
     return config
+
+
+def prepare(thread, payload: dict[str, Any], *, owner, background: bool = False, config=None, context=None) -> RunSetup:
+    """The run's input, config and context managers, after the run hooks (``RUN_HOOKS`` and the
+    graph's ``prepare``). Call it in the process that runs the graph, just before running it.
+
+    ``context``: server-set facts for the hooks (``run.context``); never from a request.
+
+    Raises ``BadRequest``, ``BudgetExceeded``, ``RunRefused`` or ``HookFailed``."""
+    from llm_kit.core.hooks import prepare as run_hooks
+    from llm_kit.runtime.graphs import prepare_hook
+
+    graph_input = build_input(payload)
+    if config is None:
+        config = build_config(thread, payload, owner=owner)
+    return run_hooks(
+        thread.graph,
+        graph_input,
+        config,
+        payload=payload,
+        owner=owner,
+        thread=thread,
+        background=background,
+        graph_hook=prepare_hook(thread.graph),
+        context=context,
+    )
 
 
 def validate_choice(graph: str, requested: str | None) -> None:
