@@ -93,6 +93,10 @@ def llm_kit_budgets(context, scope="tenant"):
         listed, available = budgets.list_for(owner, scope), True
     except service.NotPermitted:
         listed, available = [], False
+    from datetime import datetime
+
+    for b in listed:  # for the template's date filter
+        b["resets"] = datetime.fromisoformat(b["resets_at"]) if b.get("resets_at") else None
     out.update(
         available=available,
         editable=available and budgets.can_set(owner, scope),

@@ -109,7 +109,7 @@ cd example && python manage.py migrate
 ANTHROPIC_API_KEY=… python manage.py runserver        # or LLM_KIT_DEMO_OFFLINE=1 for an echo model
 ```
 
-Open http://localhost:8000 for a streaming chat page with a model picker. It runs the `chat.assistant` agent (`example/chat/agents.py`), which hands questions about your notes to a read-only `chat.researcher` on another model. Offline, a message containing "research" shows the hand-off.
+Open http://localhost:8000 for a streaming chat page with a model picker. It runs the `chat.assistant` agent (`example/chat/agents.py`), which hands questions about your notes to a read-only `chat.researcher` on another model. Offline, a message containing "research" shows the hand-off. Sign in (`python manage.py createsuperuser`) and open http://localhost:8000/settings/ for a user's AI settings page (model, temperature, their own API keys, a spending limit), built from llm-kit's [settings templates](https://teklora-solutions.github.io/django-llm-kit/guides/settings/).
 
 ## Status
 

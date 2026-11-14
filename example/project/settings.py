@@ -62,6 +62,12 @@ LLM_KIT = {
     "DEFAULT_GRAPH": "chat.assistant",
     # Demo only: lets you try the page without logging in. Keep True in real apps.
     "REQUIRE_AUTH": False,
+    # /settings/: users bring their own keys and cap their own spend.
+    "BYOK_SCOPES": ("user",),
+    "BUDGET_EDITORS": {"user": ["user"]},
+    "BUDGET_PERIODS": ["day", "month"],
+    "ENCRYPTION_KEYS": [os.environ.get("LLM_KIT_DEMO_ENCRYPTION_KEY", "dev-only-not-secret")],
 }
+LOGIN_URL = "/admin/login/"
 if os.environ.get("LLM_KIT_DEMO_OFFLINE"):
     LLM_KIT["MODEL_BACKEND"] = "chat.offline:backend"
