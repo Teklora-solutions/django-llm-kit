@@ -17,11 +17,22 @@ monitoring.breakdown("touchpoint", period="7d")        # per key: calls, error r
 monitoring.errors(period="24h")                        # by class and model, latest messages
 monitoring.top("user", metric="cost", n=10)
 monitoring.provider_health()                           # last 15 min per provider + circuit state
+monitoring.readiness()                                 # configured providers' credentials, before any call
 ```
+
+### Provider readiness
+
+`provider_health()` only knows providers that have had calls. A fallback that has never been used, or whose key is missing, is invisible there until the primary fails, and `resolve()` quietly skips a fallback with no key. `readiness()` (`GET llm/api/monitoring/readiness/`) checks every model each touchpoint is configured with (default and fallbacks, after admin overrides) without making a call:
+
+- per touchpoint: each model's `role`, `ref`, `provider` and `ready`; `ready` (the default can run), `failover_ready` (every fallback can; `null` without fallbacks), `usable`, `key_policy`, `disabled`;
+- per provider: `configured`, `ready`, `auth_type` (`api_key`, `credentials_source` for keys from `CREDENTIALS`, `none` for local and cloud-SDK providers like `ollama` or `vertex_ai`, or `missing`), `sources` (how many keys come from `credentials`, `database` and `environment`), `key_checks` (stored keys' last [test](settings.md#bring-your-own-key) results), `circuit`, `problems` (a failing `CREDENTIALS` source; every stored key failing its test) and the `touchpoints` that use it;
+- `ready` overall: false when any touchpoint's default or fallback would fail for want of credentials. Touchpoints whose callers must bring their own keys (`own_only`) and disabled ones don't count.
+
+It never returns a secret, only counts and sources. Having a key doesn't prove the provider accepts it; test stored keys, or watch `key_checks`.
 
 ## JSON API
 
-The same data over HTTP: `GET /llm/api/monitoring/{summary,timeseries,breakdown,errors,top,providers,alerts}/?period=7d&touchpoint=…`.
+The same data over HTTP: `GET /llm/api/monitoring/{summary,timeseries,breakdown,errors,top,providers,alerts}/?period=7d&touchpoint=…`, and `GET /llm/api/monitoring/readiness/` (no parameters).
 
 Staff only, unless `MONITORING_PERMISSION` names a DRF permission class.
 

@@ -28,6 +28,7 @@ urlpatterns = [
     path("monitoring/errors/", monitoring.ErrorsView.as_view(), name="monitoring-errors"),
     path("monitoring/top/", monitoring.TopView.as_view(), name="monitoring-top"),
     path("monitoring/providers/", monitoring.ProvidersView.as_view(), name="monitoring-providers"),
+    path("monitoring/readiness/", monitoring.ReadinessView.as_view(), name="monitoring-readiness"),
     path("monitoring/alerts/", monitoring.AlertsView.as_view(), name="monitoring-alerts"),
     path("tools/", tools.ToolListView.as_view(), name="tools"),
     path("tools/proposals/", tools.ProposalListView.as_view(), name="tool-proposals"),

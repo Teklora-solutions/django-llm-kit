@@ -51,7 +51,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.monitoring`
 
-`summary`, `timeseries`, `breakdown`, `errors`, `top`, `provider_health`. See [Monitoring](../guides/monitoring.md).
+`summary`, `timeseries`, `breakdown`, `errors`, `top`, `provider_health`, `readiness` (configured providers' credentials, no secrets). See [Monitoring](../guides/monitoring.md).
 
 ## `llm_kit.runtime`
 

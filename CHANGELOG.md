@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Provider readiness: `monitoring.readiness()` and `GET llm/api/monitoring/readiness/` list every provider your touchpoints are configured with (defaults and fallbacks, after overrides), including ones that have never had a call. Each says whether credentials are present, where they come from (`CREDENTIALS`, database, environment, or none needed) and how stored keys did in their last test, without returning secrets. Touchpoints get `ready` and `failover_ready` (#33).
+
 - Background subagents: `agent(..., background_subagents=True | [names])` gives `delegate` a `background` argument. The subagent starts as a `BackgroundRun` linked to the parent (`parent_thread`, `parent_run_id`, recorded under the parent's run) with the request's remaining hand-offs, depth and budget. The parent gets a task id at once. When the task finishes, its answer is queued on the parent's thread as a message, so the parent agent tells the user. `check_task` and `cancel_task` tools follow or stop the thread's tasks (migration 0018).
 
 - `llm_kit.background.run_finished` signal (`run`, `status`, `result`, `error`): sent once per background run when it is done, interrupted, errors, is cancelled (also before it started) or is lost. It comes from whichever process notices: the worker, the canceller, or whoever marks it lost. Hook messages and push notifications to it without keeping watchers open.

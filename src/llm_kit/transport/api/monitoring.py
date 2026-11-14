@@ -99,6 +99,15 @@ class ProvidersView(_MonitoringView):
         return self.respond(monitoring.provider_health, request)
 
 
+class ReadinessView(_MonitoringView):
+    """Configured providers and whether their credentials are there (never the secrets)."""
+
+    def get(self, request):
+        if request.query_params:
+            raise ValidationError({"detail": "This endpoint takes no parameters."})
+        return Response(monitoring.readiness())
+
+
 class AlertsView(_MonitoringView):
     def get(self, request):
         from llm_kit.models import AlertEvent, AlertRule
