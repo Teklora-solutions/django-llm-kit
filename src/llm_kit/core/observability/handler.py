@@ -261,6 +261,10 @@ class ObservabilityHandler(BaseCallbackHandler):
                 agent_run = self._parents.get(agent_run, "")
         return out
 
+    def count_call(self, rec: CallRecord) -> None:
+        """Count a call made outside LangChain's callbacks (an embedding) towards its runs."""
+        self._count(rec)
+
     def _count(self, rec: CallRecord) -> None:
         if rec.run_id is None:
             return

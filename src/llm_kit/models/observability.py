@@ -13,6 +13,7 @@ class LLMCall(models.Model):
     call_id = models.UUIDField(unique=True)
     run_id = models.UUIDField(null=True, blank=True, db_index=True)
     started_at = models.DateTimeField(db_index=True)
+    kind = models.CharField(max_length=20, default="chat", db_index=True)  # chat | embedding
     touchpoint = models.CharField(max_length=200, blank=True)
     agent = models.CharField(max_length=200, blank=True)
     graph = models.CharField(max_length=100, blank=True)

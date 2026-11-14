@@ -15,6 +15,7 @@ class CallRecord:
     call_id: str
     run_id: str | None  # root run this call belongs to, if any
     started_at: datetime
+    kind: str = "chat"  # chat | embedding
     touchpoint: str = ""
     graph: str = ""
     agent: str = ""  # the agent whose step this was
