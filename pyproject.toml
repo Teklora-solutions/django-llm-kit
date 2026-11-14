@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "django-llm-kit"
-version = "0.2.0.dev0"
+version = "0.2.0"
 description = "LangGraph and LangChain for Django: model policies, agents and subagents, tools from your models, a model catalogue, cost tracking, monitoring, and streaming APIs."
 readme = "README.md"
 requires-python = ">=3.11"

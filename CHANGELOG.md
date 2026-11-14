@@ -2,7 +2,9 @@
 
 All notable changes to this project are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [semantic versioning](https://semver.org/) (before 1.0, minor versions may break things; each break is listed).
 
-## [Unreleased] (0.2.0)
+## [Unreleased]
+
+## [0.2.0] - 2026-11-14
 
 ### Added
 
@@ -27,6 +29,11 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - `EXPOSE_ERRORS` controls error details in events (defaults to `DEBUG`).
 - `Touchpoint.model()` returns the chat model itself only when there is one candidate and nothing to wait for (`retry="never"`); otherwise a `TouchpointChatModel`.
 - Gemini's per-minute 429 ("exceeded your current quota … PerMinute") is classified as `rate_limit`, not `quota_exhausted`, so the circuit breaker no longer gives it the long quota cooldown.
+
+### Fixed
+
+- Provider errors that carry their HTTP status only in the message (LangChain's Google client: "503 UNAVAILABLE", "429 RESOURCE_EXHAUSTED") are classified, so they are waited out and counted by the circuit breaker.
+- The Postgres checkpointer's per-loop connection pool could make `asyncio.run` hang at exit when a pool worker was cancelled mid-job.
 
 ### Removed
 
