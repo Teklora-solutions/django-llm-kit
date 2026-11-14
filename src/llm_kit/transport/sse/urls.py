@@ -19,5 +19,6 @@ urlpatterns = [
     path("settings/save/", scoped_views.save_setting, name="settings-save"),
     path("settings/keys/add/", scoped_views.add_key, name="settings-key-add"),
     path("settings/keys/<int:pk>/remove/", scoped_views.remove_key, name="settings-key-remove"),
+    path("settings/keys/<int:pk>/test/", scoped_views.test_key, name="settings-key-test"),
     path("settings/budgets/save/", scoped_views.save_budget, name="settings-budget-save"),
 ]

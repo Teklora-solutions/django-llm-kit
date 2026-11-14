@@ -89,10 +89,19 @@ Every call records whose key it used (`LLMCall.key_owner`: `platform`, `tenant` 
 Stored keys are encrypted (`ENCRYPTION_KEYS`), like your own `ProviderKey` rows, and are never returned: the API shows a fingerprint (`…3456 1a2b3c4d`).
 
 ```
-GET    llm/api/keys/?scope=tenant     {"scope", "editable", "providers": ["anthropic", "openai"], "keys": [{"id", "provider", "label", "fingerprint", "active", "created_at"}]}
+GET    llm/api/keys/?scope=tenant     {"scope", "editable", "providers": ["anthropic", "openai"], "keys": [{"id", "provider", "label", "fingerprint", "active", "created_at", "works", "checked_at", "check_error"}]}
 POST   llm/api/keys/                  {"scope": "tenant", "provider": "anthropic", "key": "sk-...", "label": "production"}
 DELETE llm/api/keys/<id>/?scope=tenant
 ```
+
+Each key can be tested with one tiny call: a few tokens on the cheapest model your touchpoints use for that provider, sent with that key alone. The result is stored on the key (`works`, `checked_at`, `check_error`). A rate limit or quota error still counts as working, because the provider accepted the key.
+
+```
+POST   llm/api/keys/<id>/test/?scope=tenant
+POST   llm/api/keys/   {..., "verify": true}     # test first; a refused key isn't saved (400)
+```
+
+The keys template has a **Test** button per key and a "Check it works first" box, on by default. Your admins can test any keys with the **Test the selected keys** action in the Django admin.
 
 `providers` lists the providers your touchpoints call, to fill a dropdown. Anyone in the scope can list its keys. Adding and removing keys follows `SCOPE_PERMISSIONS`, as for settings. The model options in `llm/api/settings/` count the keys the asker brought.
 

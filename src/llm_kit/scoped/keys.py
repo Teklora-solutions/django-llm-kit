@@ -31,6 +31,9 @@ def describe(row) -> dict[str, Any]:
         "fingerprint": row.fingerprint,
         "active": row.active,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "checked_at": row.last_checked_at.isoformat() if row.last_checked_at else None,
+        "works": row.last_check_ok,
+        "check_error": row.last_check_error,
     }
 
 
@@ -41,7 +44,13 @@ def list_keys(who, scope: str) -> list[dict[str, Any]]:
     return [describe(r) for r in ProviderKey.objects.filter(scope=scope, scope_id=scope_id)]
 
 
-def add_key(who, scope: str, provider: str, key: str, label: str = "") -> dict[str, Any]:
+class KeyRefused(ValueError):
+    """``add_key(..., verify=True)``: the provider refused the key; it wasn't saved."""
+
+
+def add_key(who, scope: str, provider: str, key: str, label: str = "", *, verify: bool = False) -> dict[str, Any]:
+    """Store a key for ``who``'s ``scope``. With ``verify``, try it first and refuse it if the
+    provider does (``KeyRefused``); the result is recorded on the key either way."""
     from llm_kit.core.catalogue.fields import normalise_provider
     from llm_kit.models import ProviderKey
 
@@ -53,8 +62,30 @@ def add_key(who, scope: str, provider: str, key: str, label: str = "") -> dict[s
         raise ValueError("That doesn't look like an API key.")
     row = ProviderKey(provider=provider, label=(label or "")[:100], scope=scope, scope_id=scope_id)
     row.set_key(key)
+    if verify:
+        from django.utils import timezone
+
+        from llm_kit.credentials.check import check_key
+
+        result = check_key(provider, key.strip())
+        if not result.ok:
+            raise KeyRefused(f"{provider} refused the key: {result.message}")
+        row.last_checked_at, row.last_check_ok = timezone.now(), True
     row.save()
     return describe(row)
+
+
+def test_key(who, scope: str, key_id: int) -> dict[str, Any] | None:
+    """Try one of the scope's keys now; returns its description with the result, or None."""
+    from llm_kit.credentials.check import check_stored
+    from llm_kit.models import ProviderKey
+
+    scope_id = _scope_id(who, scope, editing=True)
+    row = ProviderKey.objects.filter(pk=key_id, scope=scope, scope_id=scope_id).first()
+    if row is None:
+        return None
+    result = check_stored(row)
+    return {**describe(row), "message": result.message, "model": result.model}
 
 
 def remove_key(who, scope: str, key_id: int) -> bool:
