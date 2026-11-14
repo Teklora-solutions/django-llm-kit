@@ -14,6 +14,7 @@ app_name = "llm_kit"
 urlpatterns = [
     path("stream/", views.stream, name="stream-new"),
     path("threads/<uuid:thread_id>/stream/", views.stream, name="stream"),
+    path("runs/<uuid:run_id>/watch/", views.watch, name="run-watch"),
     path("metrics/", metrics, name="metrics"),
     # Form posts from the settings templates ({% llm_kit_settings %} and friends).
     path("settings/save/", scoped_views.save_setting, name="settings-save"),

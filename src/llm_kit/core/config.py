@@ -99,6 +99,13 @@ DEFAULTS: dict[str, Any] = {
     # USD per day, from recorded calls: {"user": 5, "tenant": 50}. A request whose user or
     # tenant is over is refused before it starts.
     "DAILY_BUDGETS": {},
+    # Background runs (llm_kit.background): where they execute ("thread" in this process,
+    # "celery", "django_q", or "pkg.mod:fn" taking the run id), how watchers get their events
+    # ("auto": the Channels layer when CHANNEL_LAYERS is set, else "local" to this process),
+    # and after how many seconds without a heartbeat a running run counts as lost.
+    "RUN_EXECUTOR": "thread",
+    "RUN_EVENTS": "auto",
+    "RUN_LOST_AFTER": 60,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

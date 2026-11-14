@@ -34,7 +34,7 @@
 <main>
   <header>
     <h1>llm-kit demo</h1>
-    <span class="meta">thread <code id="thread">new</code></span>
+    <span class="meta">thread <code id="thread">new</code> · <a href="#" id="new" style="color:inherit">new chat</a></span>
     <span class="meta" style="margin-left:auto"><a href="/admin/" style="color:inherit">admin</a> · <a href="/llm/api/" style="color:inherit">api</a></span>
   </header>
   <div id="log"></div>
@@ -47,7 +47,15 @@
 <script>
 const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
 const log = document.getElementById("log");
+const SAVED = "llm-kit-demo-thread";
 let threadId = null;
+
+function remember(id) {
+  threadId = id;
+  document.getElementById("thread").textContent = id ? id.slice(0, 8) : "new";
+  try { id ? localStorage.setItem(SAVED, id) : localStorage.removeItem(SAVED); } catch {}
+}
+document.getElementById("new").addEventListener("click", (e) => { e.preventDefault(); remember(null); log.replaceChildren(); });
 
 fetch("/llm/api/touchpoints/chat.assistant/models/").then(r => r.ok ? r.json() : {models: []}).then(data => {
   const sel = document.getElementById("model");
@@ -94,48 +102,88 @@ async function* sse(response) {
   }
 }
 
+// The thread's saved messages (a snapshot, or the state after a reload).
+function render(state) {
+  log.replaceChildren();
+  for (const m of state?.values?.messages ?? []) {
+    if (m.type === "human") bubble("human", textOf(m.content));
+    else if (m.type === "ai" && m.content) bubble("ai", textOf(m.content));
+    else if (m.type === "tool") bubble("tool", `🔧 ${m.name} → ${textOf(m.content).slice(0, 300)}`);
+  }
+}
+
+// Show a run's events: a background run's stream, or watching one again after a reload.
+async function follow(res) {
+  if (!res.ok) throw new Error((await res.json()).detail);
+  const bubbles = {};
+  for await (const { event, data } of sse(res)) {
+    if (event === "thread") remember(data.id);
+    if (event === "snapshot") render(data.state);
+    // Subagents' messages arrive labelled: data.agent, data.depth > 0.
+    const sub = (data && data.depth) > 0, who = sub ? `↳ ${data.agent}` : "";
+    if (event === "token" && data.message.content) {
+      const id = data.message.id;
+      bubbles[id] ??= bubble(sub ? "ai sub" : "ai", "", who);
+      bubbles[id].body.textContent += textOf(data.message.content);
+      log.scrollTop = log.scrollHeight;
+    }
+    if (event === "message" && sub) {
+      const m = data.message;
+      if (m.type === "tool") bubble("tool sub", `🔧 ${m.name} → ${textOf(m.content).slice(0, 300)}`, who);
+      else if (m.type === "ai" && m.content && !bubbles[m.id]) bubbles[m.id] = bubble("ai sub", textOf(m.content), who);
+    }
+    if (event === "update" && data.tools) {
+      for (const m of data.tools.messages) bubble("tool", `🔧 ${m.name} → ${m.content}`);
+    }
+    if (event === "error") bubble("error", data.message);
+    if (event === "status" && ["cancelled", "lost"].includes(data.status)) bubble("error", `The run was ${data.status}.`);
+  }
+}
+
+function busy(on) {
+  document.getElementById("send").disabled = on;
+  if (!on) document.getElementById("text").focus();
+}
+
 document.getElementById("form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const input = document.getElementById("text"), send = document.getElementById("send");
+  const input = document.getElementById("text");
   const message = input.value.trim(); if (!message) return;
-  input.value = ""; send.disabled = true;
+  input.value = ""; busy(true);
   bubble("human", message);
   const url = threadId ? `/llm/threads/${threadId}/stream/` : "/llm/stream/";
   const model = document.getElementById("model").value || undefined;
-  const bubbles = {};
   try {
-    const res = await fetch(url, {
+    // In the background: reloading the page or closing it doesn't stop the run.
+    await follow(await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrf },
-      body: JSON.stringify({ message, model }),
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    for await (const { event, data } of sse(res)) {
-      if (event === "thread") { threadId = data.id; document.getElementById("thread").textContent = threadId.slice(0, 8); }
-      // Subagents' messages arrive labelled: data.agent, data.depth > 0.
-      const sub = (data && data.depth) > 0, who = sub ? `↳ ${data.agent}` : "";
-      if (event === "token" && data.message.content) {
-        const id = data.message.id;
-        bubbles[id] ??= bubble(sub ? "ai sub" : "ai", "", who);
-        bubbles[id].body.textContent += textOf(data.message.content);
-        log.scrollTop = log.scrollHeight;
-      }
-      if (event === "message" && sub) {
-        const m = data.message;
-        if (m.type === "tool") bubble("tool sub", `🔧 ${m.name} → ${textOf(m.content).slice(0, 300)}`, who);
-        else if (m.type === "ai" && m.content && !bubbles[m.id]) bubbles[m.id] = bubble("ai sub", textOf(m.content), who);
-      }
-      if (event === "update" && data.tools) {
-        for (const m of data.tools.messages) bubble("tool", `🔧 ${m.name} → ${m.content}`);
-      }
-      if (event === "error") bubble("error", data.message);
-    }
+      body: JSON.stringify({ message, model, background: true }),
+    }));
   } catch (err) {
     bubble("error", err.message);
   } finally {
-    send.disabled = false; input.focus();
+    busy(false);
   }
 });
+
+// After a reload: show the conversation, and watch its run again if it is still going.
+(async () => {
+  let saved = null;
+  try { saved = localStorage.getItem(SAVED); } catch {}
+  if (!saved) return;
+  const state = await fetch(`/llm/api/threads/${saved}/state/`);
+  if (!state.ok) { remember(null); return; }
+  remember(saved);
+  render(await state.json());
+  const runs = await (await fetch(`/llm/api/runs/?thread=${saved}`)).json();
+  const run = runs.find(r => r.status === "queued" || r.status === "running");
+  if (!run) return;
+  busy(true);
+  try { await follow(await fetch(`/llm/runs/${run.id}/watch/`)); }
+  catch (err) { bubble("error", err.message); }
+  finally { busy(false); }
+})();
 </script>
 </body>
 </html>

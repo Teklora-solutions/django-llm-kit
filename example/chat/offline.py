@@ -5,6 +5,7 @@ A tiny scripted model: it echoes, and to show the harness it hands messages cont
 """
 
 import json
+import time
 import uuid
 
 from langchain_core.language_models import BaseChatModel
@@ -51,6 +52,7 @@ class OfflineModel(BaseChatModel):
             yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_call_chunks=chunks))
             return
         for word in reply.content.split(" "):
+            time.sleep(0.15)  # like a real model, so you can reload mid-reply and see it reattach
             chunk = ChatGenerationChunk(message=AIMessageChunk(content=word + " "))
             if run_manager:
                 run_manager.on_llm_new_token(chunk.text, chunk=chunk)

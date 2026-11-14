@@ -31,6 +31,12 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 `run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
 
+`start(name, task, *, user=None, tenant=None, thread=None, model=None) -> BackgroundRun`, `astart(...)`, `watch(run)`: run an agent [in the background](../guides/streaming.md#background-runs).
+
+## `llm_kit.background`
+
+`start(thread, payload, owner=None, *, user=None, tenant=None) -> BackgroundRun`, `astart(...)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`. See [Background runs](../guides/streaming.md#background-runs).
+
 ## `llm_kit.tools`
 
 `expose(model, **options)`, `register(tool, *, permission=…, category=…)`, `select(*, names, categories, kinds)`, `for_user(user, tenant=…)`, `for_config(config)`, `all_tools()`, `guidance(tools)`, `pending_for(user)`, `approve(proposal, by)`, `reject(proposal, by, reason="")`, `PUBLIC`, `Caller`. See [Model tools](../guides/tools.md).
@@ -57,4 +63,4 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## Models
 
-`llm_kit.models`: `Thread`, `LLMCall`, `LLMRun`, `ToolCall`, `ToolProposal`, `TouchpointOverride`, `AgentOverride`, `ProviderKey`, `AlertRule`, `AlertEvent`, the `Catalogue*` tables and the `Checkpoint*` tables. All are registered in the admin.
+`llm_kit.models`: `Thread`, `BackgroundRun`, `LLMCall`, `LLMRun`, `ToolCall`, `ToolProposal`, `TouchpointOverride`, `AgentOverride`, `ProviderKey`, `AlertRule`, `AlertEvent`, the `Catalogue*` tables and the `Checkpoint*` tables. All are registered in the admin.

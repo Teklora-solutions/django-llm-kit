@@ -199,3 +199,24 @@ def make_tools_graph(checkpointer):
     b.add_conditional_edges("agent", route, ["tools", END])
     b.add_edge("tools", "agent")
     return b.compile(checkpointer=checkpointer)
+
+
+# --- a graph that waits for GATE before answering (background-run tests watch it mid-run)
+
+import threading  # noqa: E402
+
+GATE = threading.Event()
+
+
+async def gated_model(state: MessagesState, config):
+    import asyncio
+
+    await asyncio.to_thread(GATE.wait, 10)
+    model = EchoModel(messages=iter([]))
+    return {"messages": [await model.ainvoke(state["messages"], config)]}
+
+
+gated_builder = StateGraph(MessagesState)
+gated_builder.add_node("model", gated_model)
+gated_builder.add_edge(START, "model")
+gated_builder.add_edge("model", END)

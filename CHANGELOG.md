@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Background runs: start a run detached from the request (`"background": true` on SSE, REST and WebSocket runs; `agents.start()`, `background.start()`), so it keeps going when the client leaves. Anyone who may use the thread can watch it (`GET llm/runs/<id>/watch/`, WebSocket `watch`, `background.watch()`): a snapshot of where it is, then its events live. They can also cancel it from any process. `GET llm/api/runs/` lists them. Runs execute where `RUN_EXECUTOR` says: a thread (default), Celery, Django-Q2 or your own function. Their events cross processes through the Channels layer (`RUN_EVENTS`). New `BackgroundRun` table (migration 0016). A thread runs one at a time: a second run while one is going gets 409.
+
 - Budgets across processes: with Redis or Memcached as Django's cache, priced calls are added to shared counters for the budgets they count towards, so every worker sees all spend at once instead of on the next 30-second read (`SPEND_COUNTER`, default `"auto"`).
 
 - Managing other scopes: platform admins pass `scope_id` to the settings, keys and budgets APIs and template tags to manage any tenant or user, and may change every scope. Tenant managers can set one member's budget (`member=`), which replaces the all-members budget for that member. Membership is checked with the new `TENANT_MEMBERS` hook, which also lists members for pickers.

@@ -24,6 +24,9 @@ LLM_KIT = {
 | `STREAM_MODES` | `["messages", "updates", "custom"]` | LangGraph stream modes for SSE/WebSocket runs (`custom` carries subagents' messages) |
 | `SSE_KEEPALIVE` | `15` | seconds between keep-alive comments; `0` turns them off |
 | `EXPOSE_ERRORS` | `DEBUG` | include exception details in `error` events |
+| `RUN_EXECUTOR` | `"thread"` | where [background runs](../guides/streaming.md#background-runs) execute: `"thread"`, `"celery"`, `"django_q"` or `"pkg.module:fn"` |
+| `RUN_EVENTS` | `"auto"` | how background runs' events reach watchers: `"channels"` (the channel layer), `"local"` (this process), `"auto"` (channels when `CHANNEL_LAYERS` is set) |
+| `RUN_LOST_AFTER` | `60` | seconds without a heartbeat before a running background run is marked `lost` |
 
 ## Access
 
