@@ -65,6 +65,10 @@ DEFAULTS: dict[str, Any] = {
     # Scoped settings (llm_kit.scoped): who may change each scope's values,
     # {"platform"|"tenant"|"user": "dotted.path:fn(user, tenant) -> bool"}.
     "SCOPE_PERMISSIONS": {},
+    # Bring your own key: scopes that may store provider keys ("tenant", "user"; empty = off),
+    # and whose keys touchpoints use unless Settable(keys=...) says (a KeyPolicy value).
+    "BYOK_SCOPES": (),
+    "KEY_POLICY": "platform_only",
     # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
     "TENANT_RESOLVER": None,
     # Agents: how deep subagents may nest (0 = no delegation), how many hand-offs one request

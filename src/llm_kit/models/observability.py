@@ -14,6 +14,7 @@ class LLMCall(models.Model):
     run_id = models.UUIDField(null=True, blank=True, db_index=True)
     started_at = models.DateTimeField(db_index=True)
     kind = models.CharField(max_length=20, default="chat", db_index=True)  # chat | embedding
+    key_owner = models.CharField(max_length=10, blank=True, help_text="Whose key: platform, tenant or user.")
     touchpoint = models.CharField(max_length=200, blank=True)
     agent = models.CharField(max_length=200, blank=True)
     graph = models.CharField(max_length=100, blank=True)

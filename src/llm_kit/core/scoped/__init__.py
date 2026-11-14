@@ -26,6 +26,27 @@ from typing import Any
 from llm_kit.core.errors import ConfigError
 
 SCOPES = ("platform", "tenant", "user")  # broadest first
+
+
+class KeyPolicy:
+    """Whose provider keys a touchpoint's calls use (bring your own key, BYOK).
+
+    * ``PLATFORM_ONLY``: yours only (the default).
+    * ``OWN_ONLY``: only keys the caller's user or tenant stored; a provider they have no key
+      for is skipped like one with no key at all, and your keys are never spent on them.
+    * ``OWN_THEN_PLATFORM``: theirs first; yours when they have none for that provider, or as
+      the next attempt if theirs fails.
+    * ``TENANT_CHOOSES``: the tenant picks ``own_only`` or ``own_then_platform`` (the
+      ``keys.policy`` setting); ``own_then_platform`` until it does.
+    """
+
+    PLATFORM_ONLY = "platform_only"
+    OWN_ONLY = "own_only"
+    OWN_THEN_PLATFORM = "own_then_platform"
+    TENANT_CHOOSES = "tenant_chooses"
+    ALL = (PLATFORM_ONLY, OWN_ONLY, OWN_THEN_PLATFORM, TENANT_CHOOSES)
+
+
 TYPES = ("text", "number", "integer", "boolean", "choice", "model")
 
 
@@ -65,8 +86,11 @@ class Settable:
     # touchpoint bounds saved choices by its own allow, requires and price caps).
     model_allow: tuple[str, ...] = ("*",)
     params: dict[str, Param] = field(default_factory=dict)
+    keys: str | None = None  # a KeyPolicy; None = LLM_KIT["KEY_POLICY"]
 
     def __post_init__(self) -> None:
+        if self.keys is not None and self.keys not in KeyPolicy.ALL:
+            raise ConfigError(f"Settable.keys must be a KeyPolicy ({', '.join(KeyPolicy.ALL)}), not {self.keys!r}.")
         object.__setattr__(self, "model", _scopes(self.model, "Settable.model"))
         allow = (self.model_allow,) if isinstance(self.model_allow, str) else tuple(self.model_allow)
         object.__setattr__(self, "model_allow", allow)
@@ -169,4 +193,4 @@ def touchpoint_settings(tp) -> list[Setting]:
     return out
 
 
-__all__ = ["SCOPES", "Param", "Settable", "Setting", "touchpoint_settings"]
+__all__ = ["SCOPES", "KeyPolicy", "Param", "Settable", "Setting", "touchpoint_settings"]

@@ -19,12 +19,13 @@ resolved, and describes it to your UI (``GET llm/api/settings/``, ``{% llm_kit_s
 Who may change a scope's values: ``LLM_KIT["SCOPE_PERMISSIONS"]`` (see ``service.can_edit``).
 """
 
-from llm_kit.core.scoped import SCOPES, Param, Settable, Setting
+from llm_kit.core.scoped import SCOPES, KeyPolicy, Param, Settable, Setting
 from llm_kit.scoped.registry import definition, definitions, register, unregister
 from llm_kit.scoped.service import NotPermitted, UnknownSetting, can_edit, clear, save, scope_ids, value
 
 __all__ = [
     "SCOPES",
+    "KeyPolicy",
     "NotPermitted",
     "Param",
     "Settable",

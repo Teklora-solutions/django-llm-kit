@@ -86,17 +86,19 @@ class Touchpoint:
         return resolve(self, requested if requested is not None else _requested_from(config), self.env_for(config, env))
 
     def env_for(self, config: RunnableConfig | None = None, env: ResolutionEnv | None = None) -> ResolutionEnv:
-        """The env a call uses: with ``settable``, one that applies what the caller's tenant and
-        user saved (an env with ``for_caller``, as the Django adapter's has)."""
+        """The env a call uses: for a known caller, one that applies what their tenant and user
+        saved and the keys they brought (an env with ``for_caller``, as the Django adapter's has)."""
         env = env or default_env()
-        if self.settable is None:
-            return env
         for_caller = getattr(env, "for_caller", None)
         if for_caller is None:
             return env
         run = config if config is not None else _running()
         caller = ((run or {}).get("configurable") or {}).get("__llm_kit_caller")
-        return for_caller(caller) if caller is not None else env
+        if caller is None:
+            return env
+        scoped = for_caller(caller)
+        for_touchpoint = getattr(scoped, "for_touchpoint", None)  # key checks follow this touchpoint's policy
+        return for_touchpoint(self) if for_touchpoint is not None else scoped
 
     # --------------------------------------------------------------- models
 

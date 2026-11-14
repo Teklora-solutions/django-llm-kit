@@ -13,7 +13,7 @@ class ProviderKeyForm(forms.ModelForm):
 
     class Meta:
         model = ProviderKey
-        fields = ("provider", "label", "key", "active")
+        fields = ("provider", "label", "key", "active", "scope", "scope_id")
 
     def clean(self):
         data = super().clean()
@@ -33,6 +33,6 @@ class ProviderKeyForm(forms.ModelForm):
 @admin.register(ProviderKey)
 class ProviderKeyAdmin(admin.ModelAdmin):
     form = ProviderKeyForm
-    list_display = ("provider", "label", "fingerprint", "active", "updated_at")
-    list_filter = ("provider", "active")
-    search_fields = ("provider", "label")
+    list_display = ("provider", "label", "scope", "scope_id", "fingerprint", "active", "updated_at")
+    list_filter = ("provider", "active", "scope")
+    search_fields = ("provider", "label", "scope_id")
