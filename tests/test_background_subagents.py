@@ -40,14 +40,21 @@ def boss():
 
 
 def settle(thread, timeout=15):
-    """Run everything started from the thread (its tasks and their reports) to the end."""
+    """Run everything started from the thread (its tasks and their reports) to the end.
+
+    A run's thread is waited for, not only its status: "done" is saved just before its
+    run_finished receivers (which queue the report) run."""
+    from llm_kit.background import executors
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        pending = list(BackgroundRun.objects.filter(status__in=("waiting", "queued", "running")))
-        if not pending:
+        runs = list(BackgroundRun.objects.all())
+        for run in runs:
+            executors.join(run.run_id, max(0.1, deadline - time.monotonic()))
+        pending = BackgroundRun.objects.filter(status__in=("waiting", "queued", "running"))
+        if not pending.exists() and BackgroundRun.objects.count() == len(runs):
             return
-        for run in pending:
-            finish(run, timeout=1) if run.status == "running" else time.sleep(0.02)
+        time.sleep(0.02)
     raise AssertionError(f"still pending: {[(r.graph, r.status) for r in pending]}")
 
 
