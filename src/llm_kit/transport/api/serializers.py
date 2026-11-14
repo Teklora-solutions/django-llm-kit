@@ -36,6 +36,7 @@ class RunSerializer(serializers.Serializer):
     resume = serializers.JSONField(required=False, allow_null=True)
     model = serializers.CharField(required=False)
     config = serializers.DictField(required=False)
+    background = serializers.BooleanField(required=False, default=False)
 
 
 class TouchpointSerializer(serializers.Serializer):

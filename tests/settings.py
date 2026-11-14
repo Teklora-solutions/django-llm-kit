@@ -53,6 +53,7 @@ LLM_KIT = {
         "boom": "tests.graphs.boom_graph",
         "catalogue": {"graph": "tests.graphs:catalogue_builder", "touchpoint": "tests.chat"},
         "slow": "tests.graphs:slow_builder",
+        "gated": "tests.graphs:gated_builder",
         "tools": "tests.graphs:make_tools_graph",
     },
     "DEFAULT_GRAPH": "chat",

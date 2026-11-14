@@ -24,7 +24,8 @@ class ThreadViewSet(viewsets.ModelViewSet):
 
     GET  threads/<id>/state/     current state (values, next, interrupts)
     GET  threads/<id>/history/   checkpoints, newest first (?limit=20)
-    POST threads/<id>/runs/      run to completion / next interrupt, return state
+    POST threads/<id>/runs/      run to completion / next interrupt, return state;
+                                 with "background": true, start it detached (202, the run)
     """
 
     serializer_class = ThreadSerializer
@@ -70,10 +71,25 @@ class ThreadViewSet(viewsets.ModelViewSet):
         body = RunSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         payload = dict(body.validated_data)
+        owner = access.owner_from_request(request)
+        if payload.pop("background", False):
+            from llm_kit import background
+
+            try:
+                run = background.start(thread, payload, owner)
+            except runs.BadRequest as e:
+                raise ValidationError({"detail": str(e)}) from e
+            except BudgetExceeded as e:
+                return Response({"detail": str(e)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+            except background.RunBusy as e:
+                return _busy(e)
+            return Response(run.to_json(), status=status.HTTP_202_ACCEPTED)
+        if (busy := _active_run(thread)) is not None:
+            return _busy(busy)
         try:
             runs.validate_choice(thread.graph, payload.get("model"))
             graph_input = runs.build_input(payload)
-            config = runs.build_config(thread, payload, owner=access.owner_from_request(request))
+            config = runs.build_config(thread, payload, owner=owner)
         except runs.BadRequest as e:
             raise ValidationError({"detail": str(e)}) from e
         except BudgetExceeded as e:
@@ -81,6 +97,20 @@ class ThreadViewSet(viewsets.ModelViewSet):
         state = runs.invoke_run(get_graph(thread.graph), graph_input, config)
         thread.save(update_fields=["updated_at"])
         return Response(state, status=status.HTTP_200_OK)
+
+
+def _active_run(thread):
+    from llm_kit.background.service import active_run
+
+    return active_run(thread)
+
+
+def _busy(e):
+    run = getattr(e, "run", e)
+    body = {"detail": "This thread already has a run in progress."}
+    if run is not None:
+        body["run"] = run.to_json()
+    return Response(body, status=status.HTTP_409_CONFLICT)
 
 
 class TouchpointListView(APIView):

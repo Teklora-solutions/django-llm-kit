@@ -4,11 +4,14 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from llm_kit import conf
-from llm_kit.models import AlertEvent, CatalogueChange, LLMCall, LLMRun, Thread, ToolCall
+from llm_kit.models import AlertEvent, BackgroundRun, CatalogueChange, LLMCall, LLMRun, Thread, ToolCall
 
 
 class Command(BaseCommand):
-    help = "Delete old calls, runs, tool calls, captured content, catalogue changes and alerts (threads: opt-in)."
+    help = (
+        "Delete old calls, runs, background runs, tool calls, captured content, catalogue changes and alerts "
+        "(threads: opt-in)."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -33,6 +36,12 @@ class Command(BaseCommand):
             ("calls", LLMCall.objects.filter(started_at__lt=now - timedelta(days=calls))),
             ("runs", LLMRun.objects.filter(started_at__lt=now - timedelta(days=calls))),
             ("tool calls", ToolCall.objects.filter(started_at__lt=now - timedelta(days=calls))),
+            (
+                "background runs",
+                BackgroundRun.objects.filter(created_at__lt=now - timedelta(days=calls)).exclude(
+                    status__in=("queued", "running")
+                ),
+            ),
             ("catalogue changes", CatalogueChange.objects.filter(synced_at__lt=now - timedelta(days=changes))),
             ("alerts", AlertEvent.objects.filter(fired_at__lt=now - timedelta(days=changes))),
         ]

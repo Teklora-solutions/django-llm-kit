@@ -18,6 +18,7 @@ class LLMKitConfig(AppConfig):
         from django.utils.module_loading import autodiscover_modules
 
         from llm_kit import conf  # noqa: F401
+        from llm_kit.background import checks as background_checks  # noqa: F401
         from llm_kit.catalogue import signals as catalogue_signals  # noqa: F401
         from llm_kit.core.touchpoints.env import set_default_env
         from llm_kit.persistence import checks as persistence_checks  # noqa: F401

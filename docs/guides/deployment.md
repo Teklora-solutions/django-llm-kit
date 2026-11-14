@@ -10,6 +10,8 @@ Streaming needs an ASGI server: Daphne, Uvicorn or Hypercorn. Under WSGI the SSE
 
 Behind nginx, the SSE responses already send `X-Accel-Buffering: no`. Make sure proxy timeouts are longer than your longest run, or rely on the keep-alive comments (`SSE_KEEPALIVE`, 15 s).
 
+With [background runs](streaming.md#background-runs) on the default thread executor, a restart loses the runs in progress (they're marked `lost`). For long runs, use `RUN_EXECUTOR = "celery"` (or Django-Q2) and a Redis channel layer so watchers in every web process see them.
+
 ## Use a shared cache
 
 The [circuit breaker](monitoring.md#circuit-breaker) and the versioned caches for touchpoint overrides, agent overrides and stored keys live in Django's cache. With several processes, use Redis or Memcached so they agree; the local-memory cache gives each process its own view.

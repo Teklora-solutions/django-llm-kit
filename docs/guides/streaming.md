@@ -24,6 +24,7 @@ The same body for SSE, the REST `runs` action and WebSocket `run` messages:
 | `model` | e.g. `"anthropic/claude-sonnet-5-5"`; checked against the graph's [touchpoint](touchpoints.md), and reaches nodes as `configurable.model` |
 | `config` | `{"recursion_limit": …, "configurable": {…}}`; `thread_id` is always forced to the thread's own id, and keys starting with `__` are dropped |
 | `graph`, `title` | when creating a new thread |
+| `background` | `true` starts the run [in the background](#background-runs) |
 
 ## Events
 
@@ -37,6 +38,7 @@ The same body for SSE, the REST `runs` action and WebSocket `run` messages:
 | `end` | `next` and pending `interrupts` |
 | `error` | the run failed; details only when `EXPOSE_ERRORS` (defaults to `DEBUG`) |
 | `busy`, `cancelled` | WebSocket only |
+| `run`, `snapshot`, `status` | [background runs](#background-runs): started, where it is now, each change of status |
 
 The exception behind an `error` event is always logged to the `llm_kit` logger.
 
@@ -44,10 +46,11 @@ The exception behind an `error` event is always logged to the `llm_kit` logger.
 
 - `POST stream/`: create a thread and stream the first run.
 - `POST threads/<uuid>/stream/`: stream a run on an existing thread.
+- `GET runs/<uuid>/watch/`: watch a [background run](#background-runs).
 
 These are plain async Django views, so they use session auth and need the `X-CSRFToken` header. A keep-alive comment is sent every `SSE_KEEPALIVE` seconds (15) of silence, and `X-Accel-Buffering: no` stops nginx from buffering the stream. Under WSGI they still work, but the response is buffered instead of streamed.
 
-Status codes: 401 not signed in, 403 not your thread, 404 no such thread, 400 bad JSON, unknown graph or a model the touchpoint refuses.
+Status codes: 401 not signed in, 403 not your thread, 404 no such thread, 400 bad JSON, unknown graph or a model the touchpoint refuses, 409 the thread has a background run in progress, 429 over a daily budget.
 
 ```js
 const res = await fetch("/llm/stream/", {
@@ -65,7 +68,9 @@ const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
 |---|---|
 | `GET/POST threads/` | list your threads / create one (`{"graph": "assistant", "title": "…"}`) |
 | `GET/PATCH/DELETE threads/<id>/` | delete also removes the graph state |
-| `POST threads/<id>/runs/` | run to completion or the next interrupt; returns the state |
+| `POST threads/<id>/runs/` | run to completion or the next interrupt; returns the state. With `"background": true`: 202 and the run |
+| `GET runs/?status=&thread=` | your [background runs](#background-runs), newest first |
+| `GET runs/<id>/`, `POST runs/<id>/cancel/` | one run; ask it to stop |
 | `GET threads/<id>/state/` | `values`, `next`, `interrupts`, `checkpoint_id` |
 | `GET threads/<id>/history/?limit=20` | checkpoints, newest first |
 | `GET touchpoints/` | touchpoints and who chooses their model |
@@ -92,9 +97,49 @@ application = ProtocolTypeRouter({
 - `ws/llm/threads/<uuid>/`: an existing thread.
 - `ws/llm/threads/`: a new thread, created on the first `run`.
 
-Send `{"type": "run", …payload}` or `{"type": "cancel"}`. One run per connection at a time; a second gets `busy`. Disconnecting cancels the run.
+Send `{"type": "run", …payload}` or `{"type": "cancel"}`. One run per connection at a time; a second gets `busy`. Disconnecting cancels the run, unless it is a background run: `{"type": "run", "background": true, …}` starts one, `{"type": "watch", "run": "<id>"}` watches one, and `cancel` stops the one watched.
 
 Close codes: 4401 not signed in, 4403 not your thread, 4404 no such thread.
+
+## Background runs
+
+A background run belongs to its thread, not to the request that started it. Closing the tab, a dropped connection or a deploy of the web tier (with a worker executor) doesn't stop it. Anyone who may use the thread can watch it or cancel it.
+
+Start one with `"background": true` in any run payload (SSE, REST, WebSocket), or from code:
+
+```python
+from llm_kit import agents, background
+
+run = agents.start("crm.researcher", "Audit last month's invoices", user=request.user)
+run = background.start(thread, {"message": "…"}, user=request.user)   # any graph
+run.status   # queued, running, then interrupted, done, error, cancelled or lost
+run.cancel()
+```
+
+Bad payloads and callers over a daily budget are refused when you start it (400, 429). A thread runs one at a time: starting another, or a normal run, while one is going is refused (409, `RunBusy`, WebSocket `busy`) with the run in progress.
+
+**Watching** (`GET llm/runs/<id>/watch/`, WebSocket `watch`, or `async for event in background.watch(run)`) gives:
+
+1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`) and the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far;
+2. the run's events from then on, the same as a normal run's (`token`, `message`, `update`, `interrupt`, `end`, `error`);
+3. a final `status` event once it has finished; the stream then closes.
+
+Events aren't stored. A watcher who joins mid-reply sees the rest of that reply's tokens, and the whole message in the next snapshot. A slow watcher misses tokens rather than slowing the run; it never misses other events. Reconnecting gives a new snapshot.
+
+A run that ends at an `interrupt()` has status `interrupted` with the question in `result.interrupts`. Answer with a new run on the thread: `{"resume": …}`, in the background or not.
+
+**Where runs execute** is `RUN_EXECUTOR`:
+
+| Value | Runs in | Notes |
+|---|---|---|
+| `"thread"` (default) | a thread in the web process | nothing to set up; a restart loses the run |
+| `"celery"` | your Celery workers | task `llm_kit.run_in_background` |
+| `"django_q"` | Django-Q2 | `llm_kit.background.tasks.run_in_background` |
+| `"pkg.module:fn"` | your choice | called with the run id once the run is saved; have it call `llm_kit.background.execute(run_id)` |
+
+A run whose process died is marked `lost` once it has sent no heartbeat for `RUN_LOST_AFTER` seconds (60), and then no longer holds the thread. Cancelling works from any process: the run notices within a second.
+
+**How events reach watchers** is `RUN_EVENTS`. `"auto"` (the default) uses the Channels layer when `CHANNEL_LAYERS` is set to a shared one such as `channels_redis`; otherwise events only reach watchers in the same process. That is fine with the thread executor and one web process. With workers, or several web processes behind a load balancer, set up a Redis channel layer. The system check `llm_kit.W002` warns about a worker executor without one.
 
 ## Human in the loop
 

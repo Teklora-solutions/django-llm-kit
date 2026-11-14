@@ -17,9 +17,13 @@ Each agent is a graph by its name (streaming endpoints, threads, checkpoints), c
 work to its subagents with the ``delegate`` tool, and can be run from code::
 
     llm_kit.agents.run("crm.researcher", "Which invoices are overdue?", user=request.user)
+
+or started in the background, to watch (or leave) while it works::
+
+    run = llm_kit.agents.start("crm.researcher", "Audit last month's invoices", user=request.user)
 """
 
-from llm_kit.agents.run import arun, config_for, run, stream
+from llm_kit.agents.run import arun, astart, config_for, run, start, stream, watch
 from llm_kit.core.agents import (
     AgentContext,
     AgentOverride,
@@ -44,8 +48,11 @@ __all__ = [
     "agent",
     "all_agents",
     "arun",
+    "astart",
     "config_for",
     "get_agent",
     "run",
+    "start",
     "stream",
+    "watch",
 ]

@@ -7,6 +7,7 @@ from llm_kit.admin import (  # noqa: F401
     credentials,
     monitoring,
     observability,
+    runs,
     scoped,
     threads,
     tools,

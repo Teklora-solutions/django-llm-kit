@@ -308,3 +308,56 @@ async def stream(
     finally:
         if thread is None and thread_id is None:
             await sync_to_async(_forget)(cfg, nested)
+
+
+# ------------------------------------------------------------------ in the background
+
+
+def start(
+    name: str,
+    task: str,
+    *,
+    user=None,
+    tenant: Any = None,
+    thread=None,
+    model: str | None = None,
+):
+    """Start agent ``name`` on ``task`` in the background and return the ``BackgroundRun`` at once.
+
+    The run keeps going on its own (``LLM_KIT["RUN_EXECUTOR"]``); watch it with
+    ``agents.watch(run)`` or ``llm/runs/<id>/watch/``, stop it with ``run.cancel()``. Without
+    ``thread`` a new thread is made for it (a background run's state is always kept, so
+    watchers can see where it is). Refused at once (``BudgetExceeded``) when the caller is over
+    a daily budget, and with ``RunBusy`` when ``thread`` already has a run in progress.
+    """
+    from llm_kit import background
+    from llm_kit.models import Thread
+    from llm_kit.runtime import access
+
+    get_agent(name)  # UnknownAgent before anything is created
+    if thread is not None:
+        user, tenant, _ = _from_thread(name, thread, user, tenant, None)
+    owner = access.owner_for(user, tenant=tenant)
+    if thread is None:
+        thread = Thread.objects.create(
+            graph=name,
+            user=owner.user if owner.is_authenticated else None,
+            tenant=owner.tenant_id,
+            title=str(task)[:255],
+        )
+    payload: dict[str, Any] = {"message": task}
+    if model is not None:
+        payload["model"] = model
+    return background.start(thread, payload, owner)
+
+
+async def astart(name: str, task: str, **kwargs):
+    return await sync_to_async(start)(name, task, **kwargs)
+
+
+def watch(run) -> AsyncIterator[dict]:
+    """A background run's events: a ``snapshot`` of where it is, then what it does, until a final
+    ``status`` event. ``run`` is a ``BackgroundRun`` (check the watcher may see it first)."""
+    from llm_kit import background
+
+    return background.watch(run)

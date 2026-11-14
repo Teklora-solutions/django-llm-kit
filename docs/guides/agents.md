@@ -56,7 +56,13 @@ result.text, result.output, result.steps, result.stopped   # plus token counts
 result = await agents.arun(...)                 # async
 async for event in agents.stream(...):          # token / message / update / end / error events
     ...
+
+run = agents.start("crm.researcher", "Audit last month's invoices", user=request.user)
+async for event in agents.watch(run):           # a snapshot, then live events
+    ...
 ```
+
+`agents.start` runs the agent [in the background](streaming.md#background-runs), on a new thread unless you pass `thread=`. It returns at once, keeps going without the request, and can be watched or cancelled from anywhere.
 
 - Pass `thread=` (a `Thread`) or `thread_id=` to continue a conversation.
 - Without either, the run is **throwaway**: it and its subagents keep their state in memory, never in the database, and it is freed when the run ends. The recorded calls and runs are kept. This also means a throwaway run works inside a test transaction (Django's `TestCase`).
