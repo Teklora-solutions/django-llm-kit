@@ -16,6 +16,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 - **Checkpointer choice:** `CHECKPOINTER` can be `DjangoSaver`, LangGraph's `PostgresSaver`, or your own saver or factories, with one async saver per event loop.
 - **Waiting out rate limits:** a short rate limit or overload is waited out on the same model before falling back, as long as the touchpoint's `RetryPolicy` allows (`RETRY` setting, `touchpoint(retry=)`, `model(retry=)`, `agents.run(retry=)`). Daily quotas are never waited out.
 - `AllModelsFailed` when every model of a touchpoint fails, listing each model's error.
+- `model(fallbacks=False)` / `complete(fallbacks=False)`: only the resolved model, for one call.
 - `agents.run` inside a running agent joins its request: same caller and limits, recorded in its run tree, streamed with it (`join=False` for a separate request).
 - Documentation site with Markdown versions of every page and `llms.txt`.
 

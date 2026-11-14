@@ -56,6 +56,8 @@ agents.run("crm.digest_writer", task, retry="batch")                     # every
 
 The policy for a call is the first of: `model(retry=)` / `complete(retry=)`, `agents.run(retry=)`, `touchpoint(retry=)`, `LLM_KIT["RETRY"]`. A stream waits and falls back only before its first chunk; after that the caller already has part of the answer.
 
+`model(fallbacks=False)` (or `complete(fallbacks=False)`) uses only the resolved model for that call, for results you compare across runs, such as an evaluation's judge. It still waits per its policy.
+
 When **every** model fails, the call raises `llm_kit.AllModelsFailed`. Its message lists each model's error, `errors` holds `(model, exception)` pairs in the order tried, and `__cause__` is the last one. A touchpoint with a single model raises that model's own error. Each attempt is a [recorded call](observability.md) with its error class.
 
 Provider SDKs retry on their own too (Anthropic's and OpenAI's clients retry twice by default). llm-kit's wait comes after theirs, so lower the SDK's `max_retries` in `params` if you want llm-kit to decide.

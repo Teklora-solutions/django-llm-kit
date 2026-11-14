@@ -23,8 +23,8 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Method | Returns |
 |---|---|
-| `model(requested=None, *, config=None, retry=None, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call |
-| `complete(prompt, *, schema=None, requested=None, config=None, retry=None, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
+| `model(requested=None, *, config=None, retry=None, fallbacks=True, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call; `fallbacks=False` uses only the resolved model |
+| `complete(prompt, *, schema=None, requested=None, config=None, retry=None, fallbacks=True, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
 
 ## `llm_kit.agents`

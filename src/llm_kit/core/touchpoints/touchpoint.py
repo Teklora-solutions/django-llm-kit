@@ -92,17 +92,22 @@ class Touchpoint:
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
         **params: Any,
     ) -> Runnable:
         """A chat model for this touchpoint, wrapped with its fallbacks.
 
         ``params`` override the touchpoint's params for this call (e.g. ``max_tokens``).
         ``retry`` overrides how long a short rate limit is waited out before falling back.
+        ``fallbacks=False`` uses only the resolved model for this call (results compared
+        across runs shouldn't come from whichever model answered); it still waits per ``retry``.
         The returned runnable supports ``invoke``/``stream``/``bind_tools``/``with_structured_output``.
         """
         from llm_kit.core.touchpoints.backends import build_for
 
         resolution = self.resolve(requested, config=config, env=env)
+        if not fallbacks:
+            resolution.fallbacks = []
         if params:
             resolution.params = {**resolution.params, **params}
         return build_for(self, resolution, env or default_env(), retry=policy_for(self, config, retry))
@@ -118,6 +123,7 @@ class Touchpoint:
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
         **params: Any,
     ) -> Any:
         """Call the model once. With ``schema``, return a validated instance of it.
@@ -125,7 +131,7 @@ class Touchpoint:
         Uses native structured output when the model supports it, otherwise
         parses JSON out of the reply (code fences and surrounding prose are tolerated).
         """
-        llm = self.model(requested, config=config, env=env, retry=retry, **params)
+        llm = self.model(requested, config=config, env=env, retry=retry, fallbacks=fallbacks, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
         if schema is None:
@@ -145,9 +151,10 @@ class Touchpoint:
         config: RunnableConfig | None = None,
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
         **params: Any,
     ) -> Any:
-        llm = self.model(requested, config=config, env=env, retry=retry, **params)
+        llm = self.model(requested, config=config, env=env, retry=retry, fallbacks=fallbacks, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
         if schema is None:

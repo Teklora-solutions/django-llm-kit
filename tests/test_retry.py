@@ -239,3 +239,12 @@ def test_a_text_only_overload_is_waited_out_briefly():
         "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is experiencing high demand.'}}"
     )
     assert retry_after(exc) == 5.0
+
+
+def test_fallbacks_can_be_turned_off_for_one_call_and_it_still_waits():
+    FAILURES["anthropic/claude-sonnet-5-5"] = [RateLimitError(GEMINI_MINUTE), ConnectionError("down")]
+    llm = tp().model(env=FakeEnv(), fallbacks=False)
+    assert isinstance(llm, TouchpointChatModel) and len(llm.models) == 1
+    with pytest.raises(ConnectionError):  # waited once, then its own error: no fallback tried
+        llm.invoke("hi")
+    assert CALLS == ["anthropic/claude-sonnet-5-5"] * 2 and SLEPT == [4.0]
