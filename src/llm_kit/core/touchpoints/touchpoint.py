@@ -111,6 +111,7 @@ class Touchpoint:
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
+        caller: Any = None,
         **params: Any,
     ) -> Runnable:
         """A chat model for this touchpoint, wrapped with its fallbacks.
@@ -120,10 +121,14 @@ class Touchpoint:
         ``fallbacks=False`` uses only the resolved model for this call (results compared
         across runs shouldn't come from whichever model answered); it still waits per ``retry``.
         The returned runnable supports ``invoke``/``stream``/``bind_tools``/``with_structured_output``.
+        ``caller`` (a ``Caller``, an ``Owner`` or a user) is who the call is for, outside a request or
+        agent run: their saved settings, keys and budgets apply (invoke with ``run_config(config)``
+        so it is recorded for them too).
         """
         from llm_kit.core.observability.spend import check_daily_budget
         from llm_kit.core.touchpoints.backends import build_for
 
+        config = with_caller(config, caller)
         check_daily_budget(self)  # BudgetExceeded once today's spend reaches daily_budget
         env = self.env_for(config, env)
         if (check_budgets := getattr(env, "check_budgets", None)) is not None:
@@ -149,6 +154,7 @@ class Touchpoint:
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
+        caller: Any = None,
         **params: Any,
     ) -> Any:
         """Call the model once. With ``schema``, return a validated instance of it.
@@ -156,6 +162,7 @@ class Touchpoint:
         Uses native structured output when the model supports it, otherwise
         parses JSON out of the reply (code fences and surrounding prose are tolerated).
         """
+        config = with_caller(config, caller)
         llm = self.model(requested, config=config, env=env, retry=retry, fallbacks=fallbacks, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
@@ -177,8 +184,10 @@ class Touchpoint:
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
+        caller: Any = None,
         **params: Any,
     ) -> Any:
+        config = with_caller(config, caller)
         llm = self.model(requested, config=config, env=env, retry=retry, fallbacks=fallbacks, **params)
         messages = _messages(prompt)
         run_config = self._run_config(config)
@@ -201,6 +210,7 @@ class Touchpoint:
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
+        caller: Any = None,
         **params: Any,
     ) -> list[list[float]]:
         """Embed ``inputs`` (a string, or a list of strings or media parts): one vector each.
@@ -210,7 +220,14 @@ class Touchpoint:
         from llm_kit.core.touchpoints import embeddings
 
         call, items = embeddings.prepare(
-            self, inputs, requested=requested, config_=config, env=env, retry=retry, fallbacks=fallbacks, params={}
+            self,
+            inputs,
+            requested=requested,
+            config_=with_caller(config, caller),
+            env=env,
+            retry=retry,
+            fallbacks=fallbacks,
+            params={},
         )
         return embeddings.run_sync(call, items, params)
 
@@ -223,12 +240,20 @@ class Touchpoint:
         env: ResolutionEnv | None = None,
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
+        caller: Any = None,
         **params: Any,
     ) -> list[list[float]]:
         from llm_kit.core.touchpoints import embeddings
 
         call, items = embeddings.prepare(
-            self, inputs, requested=requested, config_=config, env=env, retry=retry, fallbacks=fallbacks, params={}
+            self,
+            inputs,
+            requested=requested,
+            config_=with_caller(config, caller),
+            env=env,
+            retry=retry,
+            fallbacks=fallbacks,
+            params={},
         )
         return await embeddings.run_async(call, items, params)
 
@@ -239,7 +264,9 @@ class Touchpoint:
         without one from inside a running agent (a tool, a code agent, code they call), it
         joins that agent's run too: recorded in its run tree and counted in its totals.
         Otherwise it is a recorded run of its own, named after the touchpoint. Metadata you
-        pass (for example ``{"llm_kit_agent": "crm.writer"}``) is recorded with the call."""
+        pass (for example ``{"llm_kit_agent": "crm.writer"}``) is recorded with the call, and so
+        is the user and tenant of a caller in ``configurable`` (see ``caller=``)."""
+        config = _caller_metadata(config)
         if config and config.get("callbacks"):
             return config
         if (parent := _running()) is not None and parent.get("callbacks") is not None:
@@ -259,6 +286,41 @@ class Touchpoint:
         return {**(config or {}), "callbacks": [handler], "run_name": self.name}
 
     _run_config = run_config
+
+
+CALLER_KEY = "__llm_kit_caller"  # same as llm_kit.tools.caller.CONFIG_KEY
+
+
+def with_caller(config: RunnableConfig | None, caller: Any) -> RunnableConfig | None:
+    """``config`` with ``caller`` as the run's caller (``caller=None`` leaves it as it is)."""
+    if caller is None:
+        return config
+    config = dict(config or {})
+    config["configurable"] = {**(config.get("configurable") or {}), CALLER_KEY: caller}
+    return config
+
+
+def caller_ids(caller: Any) -> tuple[str, str]:
+    """``(user id, tenant id)`` as recorded on calls, "" when unknown, for a ``Caller``, an
+    ``Owner`` or a user."""
+    user = getattr(caller, "user", caller)
+    user_id = getattr(user, "pk", None) if getattr(user, "is_authenticated", False) else None
+    tenant = getattr(caller, "tenant_id", None)
+    return ("" if user_id is None else str(user_id)), ("" if tenant in (None, "") else str(tenant))
+
+
+def _caller_metadata(config: RunnableConfig | None) -> RunnableConfig | None:
+    """Record the configured caller's user and tenant, unless the metadata already says."""
+    caller = ((config or {}).get("configurable") or {}).get(CALLER_KEY)
+    if caller is None:
+        return config
+    user_id, tenant = caller_ids(caller)
+    metadata = dict(config.get("metadata") or {})
+    if user_id and "user_id" not in metadata:
+        metadata["user_id"] = user_id
+    if tenant and "tenant" not in metadata:
+        metadata["tenant"] = tenant
+    return {**config, "metadata": metadata}
 
 
 def _running() -> RunnableConfig | None:
