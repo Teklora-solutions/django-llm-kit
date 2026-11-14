@@ -9,8 +9,8 @@
     {% for b in budgets %}
       <tr>
         <td>{{ b.touchpoint|default:"All" }}</td><td>{{ b.period }}</td>
-        <td>${{ b.spent }}</td><td>${{ b.amount }}{% if b.counts == "platform_keys" %} <small>(platform keys only)</small>{% endif %}</td>
-        <td>{{ b.resets_at|default:"" }}</td>
+        <td>${{ b.spent|floatformat:2 }}</td><td>${{ b.amount }}{% if b.counts == "platform_keys" %} <small>(platform keys only)</small>{% endif %}</td>
+        <td>{% if b.resets %}<time datetime="{{ b.resets_at }}">{{ b.resets|date:"M j, H:i" }}</time>{% endif %}</td>
         <td>{% if editable %}<form method="post" action="{% url 'llm_kit:settings-budget-save' %}">
           <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
           <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">

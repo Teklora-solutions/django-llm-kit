@@ -209,3 +209,4 @@ The same sections as server-rendered forms, for pages you build with Django temp
 - Someone who may not change a scope sees its values with the inputs disabled. Someone who doesn't have the scope (no tenant, say) sees a short note.
 - The HTML is plain and has no classes beyond `llm-kit-*` hooks, so your CSS styles it. To change the markup, override any template in your project: `llm_kit/settings/sections.html`, `section.html`, `setting.html`, `fields/<type>.html` (`text`, `number`, `integer`, `boolean`, `choice`, `model`), `keys.html` and `budgets.html`.
 
+The example project's `/settings/` page (`example/chat/templates/chat/settings.html`) uses all three tags, with a stylesheet of about 30 lines.

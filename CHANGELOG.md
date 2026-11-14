@@ -6,6 +6,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- The example project has a `/settings/` page built from the settings templates.
 - Settings templates: `{% llm_kit_settings %}`, `{% llm_kit_keys %}` and `{% llm_kit_budgets %}` render settings, brought keys and budgets as forms. They post to new views under `llm/settings/` and can be overridden template by template.
 
 - Budgets per tenant, per member of a tenant, and per user, for any period (`BUDGET_PERIODS`: day, week, month or your own), optionally for one touchpoint and optionally counting only calls on platform keys. `BUDGET_EDITORS` decides who sets them. Checked before every call. `GET/PUT/DELETE llm/api/budgets/` returns spent, remaining and when the period resets. New `ScopedBudget` table (migration 0014). The spend tracker now keeps a total per scope, touchpoint and period.

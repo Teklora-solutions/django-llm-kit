@@ -1,0 +1,59 @@
+{% load llm_kit %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI settings · llm-kit demo</title>
+<style>
+  :root { --bg:#f6f5f2; --panel:#fff; --ink:#1d1d1b; --muted:#6b6a65; --line:#e3e1db; --accent:#2f5d50; --bad:#c0483b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161615; --panel:#1f1f1d; --ink:#ecebe6; --muted:#9a9890; --line:#33322f; --accent:#7fb8a4; --bad:#e07a6e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px 64px; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  h1 { font-size:20px; margin:0; } h2 { font-size:16px; margin:32px 0 8px; } h3 { font-size:15px; margin:0 0 4px; }
+  a { color:var(--accent); }
+  .lead, small, .llm-kit-description, .llm-kit-empty { color:var(--muted); }
+  .messages { list-style:none; padding:0; margin:16px 0 0; }
+  .messages li { padding:8px 12px; border-radius:8px; border:1px solid var(--line); background:var(--panel); }
+  .messages .error { border-color:var(--bad); color:var(--bad); }
+  .llm-kit-section { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .llm-kit-setting { display:grid; grid-template-columns:140px minmax(0,1fr) auto auto; gap:6px 10px; align-items:center;
+                     padding:10px 0; border-top:1px solid var(--line); }
+  .llm-kit-setting small { grid-column:2 / -1; }
+  input, select, button { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 10px; min-width:0; max-width:100%; }
+  button { background:var(--accent); color:var(--bg); border-color:var(--accent); cursor:pointer; }
+  button[name="clear"], button[name="remove"], .llm-kit-keys td button { background:transparent; color:var(--accent); }
+  table { width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); font-size:14px; }
+  .llm-kit-key-add, .llm-kit-budget-set { display:flex; flex-wrap:wrap; gap:8px; align-items:end; margin-top:12px; }
+  .llm-kit-key-add label, .llm-kit-budget-set label { display:flex; flex-direction:column; font-size:13px; color:var(--muted); gap:2px; }
+  @media (max-width: 560px) {
+    .llm-kit-setting { grid-template-columns:1fr; } .llm-kit-setting small { grid-column:auto; }
+    table { display:block; overflow-x:auto; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AI settings</h1>
+    <a href="/">Back to chat</a>
+  </header>
+  <p class="lead">Signed in as {{ request.user.get_username }}. These apply to your chats only.</p>
+  {% if messages %}<ul class="messages">{% for m in messages %}<li class="{{ m.tags }}">{{ m }}</li>{% endfor %}</ul>{% endif %}
+
+  <h2>Assistant</h2>
+  {% llm_kit_settings scope="user" %}
+
+  <h2>Your API keys</h2>
+  <p class="lead">Calls use your key for that provider first, then the demo's.</p>
+  {% llm_kit_keys scope="user" %}
+
+  <h2>Spending limits</h2>
+  {% llm_kit_budgets scope="user" %}
+</main>
+</body>
+</html>
