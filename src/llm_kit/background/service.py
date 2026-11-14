@@ -185,11 +185,24 @@ def _at_interrupt(thread: Thread) -> bool:
 
 
 def _finished(run: BackgroundRun) -> None:
-    """After ``run`` reached a final status: the next waiting run on its thread may start."""
+    """After this process moved ``run`` to a final status (only the one whose change took
+    effect calls this): ``run_finished``, and the next waiting run on its thread may start."""
+    transaction.on_commit(lambda: _announce(run.pk))
     try:
         advance(run.thread_id)
     except Exception:
         logger.exception("Could not start the next run on thread %s", run.thread_id)
+
+
+def _announce(run_pk) -> None:
+    from llm_kit.background.signals import run_finished
+
+    run = BackgroundRun.objects.select_related("thread").get(pk=run_pk)
+    for receiver, response in run_finished.send_robust(
+        sender=BackgroundRun, run=run, status=run.status, result=run.result, error=run.error
+    ):
+        if isinstance(response, Exception):
+            logger.error("run_finished receiver %r failed for run %s", receiver, run.run_id, exc_info=response)
 
 
 async def astart(thread: Thread, payload: dict[str, Any], owner: Any = None, **kw) -> BackgroundRun:
@@ -265,13 +278,18 @@ async def aexecute(run_id: str) -> None:
     finally:
         watchdog.cancel()
         executors.unregister_local(run.run_id)
-    await BackgroundRun.objects.filter(pk=run.pk).aupdate(
+    # Only if still running: a run marked lost meanwhile (heartbeats delayed) stays lost, and was
+    # announced as lost already.
+    ended = await BackgroundRun.objects.filter(pk=run.pk, status="running").aupdate(
         status=status, ended_at=timezone.now(), result=result, error=error
     )
     await Thread.objects.filter(pk=run.thread_id).aupdate(updated_at=timezone.now())
     run = await BackgroundRun.objects.aget(pk=run.pk)
     await bus.publish(run.run_id, _status_event(run))
-    await sync_to_async(_finished)(run)
+    if ended:
+        await sync_to_async(_finished)(run)
+    else:
+        logger.warning("Background run %s finished %s after it was marked %s", run.run_id, status, run.status)
 
 
 async def _watchdog(run_id: str, task: asyncio.Task | None) -> None:
@@ -305,6 +323,7 @@ def cancel(run: BackgroundRun) -> bool:
         status="cancelled", cancel_requested=True, ended_at=timezone.now()
     ):
         run.status, run.cancel_requested = "cancelled", True
+        _finished(run)
         return True
     # Not picked up yet: it ends here (a worker that takes it later finds it cancelled).
     if BackgroundRun.objects.filter(pk=run.pk, status="queued").update(
