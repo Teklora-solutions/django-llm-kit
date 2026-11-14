@@ -5,9 +5,11 @@ user's within a tenant), which touchpoint ("" = all), which period (``day``, ``w
 ``month`` or one you define), and whether calls made with keys the caller brought count.
 
 Each total is the period's recorded spend (read from the database by the Django adapter, again
-every ``REFRESH`` seconds, which also picks up other processes' calls) plus the cost of this
-process's calls priced since that read. It is approximate: calls priced in another process
-show up at the next read, and a total can go over its budget by about one call's cost.
+every ``REFRESH`` seconds) plus what was spent since that read. With a shared ``counter`` (the
+Django adapter uses a Redis or Memcached cache), "since" covers every process's priced calls, so
+a budget sees other workers' spend at once. Without one it covers this process's calls only, and
+other processes' spend shows up at the next read. Either way a total can go over its budget by
+about one call's cost: a call already under way finishes.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 logger = logging.getLogger("llm_kit.observability")
 
@@ -53,6 +55,14 @@ Seed = Callable[[SpendKey, datetime], Decimal]  # recorded spend for key since s
 PeriodStart = Callable[[str], datetime]  # period name -> when the current one started
 
 
+class Counter(Protocol):
+    """Spend shared by every process, per ``(key, period start)``."""
+
+    def get(self, key: SpendKey, start: datetime) -> Decimal: ...
+
+    def add(self, key: SpendKey, start: datetime, amount: Decimal) -> None: ...
+
+
 def default_period_start(period: str, now: datetime | None = None) -> datetime:
     now = now or datetime.now()
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -72,18 +82,23 @@ class _Total:
     local: Decimal  # this process's calls priced since then
     read_at: float  # time.monotonic() of the last read; 0 = never read
     reading: bool = False
+    shared_at_read: Decimal | None = None  # the shared counter when the database was read
 
 
 class SpendTracker:
     def __init__(self) -> None:
         self.seed: Seed | None = None
         self.period_start: PeriodStart = default_period_start
+        self.counter: Counter | None = None
         self._totals: dict[SpendKey, _Total] = {}
         self._lock = threading.Lock()
 
-    def configure(self, seed: Seed | None, period_start: PeriodStart | None = None) -> None:
+    def configure(
+        self, seed: Seed | None, period_start: PeriodStart | None = None, counter: Counter | None = None
+    ) -> None:
         self.seed = seed
         self.period_start = period_start or default_period_start
+        self.counter = counter
         with self._lock:
             self._totals.clear()
 
@@ -107,7 +122,7 @@ class SpendTracker:
             stale = self.seed is not None and not entry.reading and time.monotonic() - entry.read_at > REFRESH
             if stale:
                 entry.reading = True
-            value = entry.recorded + entry.local
+            value = self._value(key, entry)
         if not stale:
             return value
         if _in_event_loop():
@@ -115,13 +130,29 @@ class SpendTracker:
             return value
         self._read(key)
         with self._lock:
-            entry = self._total(key)
-            return entry.recorded + entry.local
+            return self._value(key, self._total(key))
+
+    def _value(self, key: SpendKey, entry: _Total) -> Decimal:
+        """Recorded spend plus what was spent since: every process's (shared counter), else this one's."""
+        if self.counter is not None and entry.shared_at_read is not None:
+            try:
+                since = self.counter.get(key, entry.start) - entry.shared_at_read
+            except Exception:
+                logger.warning("Shared spend counter unavailable; using this process's spend.", exc_info=True)
+            else:
+                return entry.recorded + max(since, Decimal(0))
+        return entry.recorded + entry.local
 
     def _read(self, key: SpendKey) -> None:
         started = time.monotonic()
         with self._lock:
             start = self._total(key).start
+        shared = None
+        if self.counter is not None:  # first: a call counted here but not yet written is missed, not doubled
+            try:
+                shared = self.counter.get(key, start)
+            except Exception:
+                shared = None
         try:
             recorded = self.seed(key, start) if self.seed is not None else Decimal(0)
         except Exception:
@@ -135,6 +166,7 @@ class SpendTracker:
             entry = self._total(key)
             # The read includes everything already written; this process's calls before it are in it.
             entry.recorded, entry.local, entry.read_at, entry.reading = Decimal(recorded), Decimal(0), started, False
+            entry.shared_at_read = shared
 
     def observe(self, call: Any) -> None:
         """Recorder observer: count each priced call towards every total it belongs to."""

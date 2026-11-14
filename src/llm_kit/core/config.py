@@ -77,6 +77,9 @@ DEFAULTS: dict[str, Any] = {
     # {"tenant" | "member" | "user": ["platform" | "tenant" | "user", ...]}. Empty = nobody.
     "BUDGET_PERIODS": ("day", "month"),
     "BUDGET_EDITORS": {},
+    # Spend shared across processes for budgets: "auto" (Django's cache unless it is per-process),
+    # "cache" (always), or None (each process sees others' spend every 30 s).
+    "SPEND_COUNTER": "auto",
     # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
     "TENANT_RESOLVER": None,
     # Agents: how deep subagents may nest (0 = no delegation), how many hand-offs one request

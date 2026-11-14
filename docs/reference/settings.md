@@ -36,6 +36,7 @@ LLM_KIT = {
 | `KEY_POLICY` | `"platform_only"` | whose keys touchpoints use unless `Settable(keys=)` says: `platform_only`, `own_only`, `own_then_platform`, `tenant_chooses` |
 | `BUDGET_PERIODS` | `("day", "month")` | periods tenant, member and user budgets may use; names, or `{"name": "dotted.path:fn(now) -> start"}` |
 | `BUDGET_EDITORS` | `{}` | who may set each kind of budget: `{"tenant" \| "member" \| "user": ["platform" \| "tenant" \| "user"]}` ([budgets](../guides/settings.md#budgets)) |
+| `SPEND_COUNTER` | `"auto"` | budgets see every process's spend at once through Django's cache: `"auto"` (unless the cache is per-process), `"cache"`, or `None` |
 | `TENANT_MEMBERS` | `None` | dotted path to `fn(tenant_id) -> users or ids`: lets tenant managers set one member's budget, and lists members for pickers |
 | `TENANT_RESOLVER` | `None` | dotted path to `fn(user) -> tenant`, or `fn(user, request=None, scope=None)` to pick a tenant per request ([users in several tenants](../guides/access.md#users-in-several-tenants)); scopes threads, model tools and call records |
 

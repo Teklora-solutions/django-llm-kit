@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Budgets across processes: with Redis or Memcached as Django's cache, priced calls are added to shared counters for the budgets they count towards, so every worker sees all spend at once instead of on the next 30-second read (`SPEND_COUNTER`, default `"auto"`).
+
 - Managing other scopes: platform admins pass `scope_id` to the settings, keys and budgets APIs and template tags to manage any tenant or user, and may change every scope. Tenant managers can set one member's budget (`member=`), which replaces the all-members budget for that member. Membership is checked with the new `TENANT_MEMBERS` hook, which also lists members for pickers.
 
 - `caller=` on `model()`, `complete()`, `acomplete()`, `embed()` and `aembed()`: who a call outside a request or agent run is for. Their saved settings, keys and budgets apply, and the call records their user and tenant. A caller given in `config` is now recorded too (#24).
@@ -37,6 +39,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- A tenant member could read another member's own budget and spend (`GET llm/api/budgets/?scope=member&member=<id>`). Seeing someone else's member budget now needs the same permission as setting it.
 - `embed()` ignored a touchpoint's dotted-path or callable `backend=` and fell back to `EMBEDDING_BACKEND`. It now uses `touchpoint(embedding_backend=)`, then `backend=`, then the setting. A factory that returns a chat model raises an error that names it (#17).
 
 ## [0.2.0] - 2026-11-14
