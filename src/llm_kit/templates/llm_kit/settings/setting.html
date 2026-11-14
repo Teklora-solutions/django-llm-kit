@@ -1,6 +1,6 @@
 <form class="llm-kit-setting" method="post" action="{% url 'llm_kit:settings-save' %}" data-key="{{ setting.key }}">
   <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-  <input type="hidden" name="scope" value="{{ scope }}">
+  <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}">
   <input type="hidden" name="touchpoint" value="{{ setting.touchpoint }}">
   <input type="hidden" name="key" value="{{ setting.key }}">
   <input type="hidden" name="next" value="{{ next }}">

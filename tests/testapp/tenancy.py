@@ -29,3 +29,8 @@ def workspace_for(user, request=None, scope=None):
 def can_manage(user, tenant):
     """Who may change a tenant's scoped settings, for tests: alice."""
     return user.username == "alice"
+
+
+def members_of(tenant_id):
+    """TENANT_MEMBERS for tests."""
+    return Member.objects.filter(organisation_id=tenant_id).values_list("user_id", flat=True)

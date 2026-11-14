@@ -31,7 +31,9 @@ def _say(request, level: str, text: str) -> None:
 
 def _run(request, action, done: str):
     try:
-        action(access.owner_from_request(request))
+        owner = access.owner_from_request(request)
+        owner = service.target(owner, request.POST.get("scope", ""), request.POST.get("scope_id") or None)
+        action(owner)
     except (service.NotPermitted, access.NotAllowed) as e:
         _say(request, "error", str(e))
     except service.UnknownSetting as e:
@@ -89,12 +91,12 @@ def save_budget(request):
 
     def action(owner):
         scope, period, touchpoint = p.get("scope", ""), p.get("period", ""), p.get("touchpoint", "")
+        member = p.get("member") or None
         if "remove" in p:
-            budgets.remove_budget(owner, scope, period, touchpoint=touchpoint)
+            budgets.remove_budget(owner, scope, period, touchpoint=touchpoint, member=member)
         else:
-            budgets.set_budget(
-                owner, scope, period, p.get("amount", ""), touchpoint=touchpoint, counts=p.get("counts") or "all"
-            )
+            amount, counts = p.get("amount", ""), p.get("counts") or "all"
+            budgets.set_budget(owner, scope, period, amount, touchpoint=touchpoint, counts=counts, member=member)
 
     return _run(request, action, "Budget saved." if "remove" not in request.POST else "Budget removed.")
 

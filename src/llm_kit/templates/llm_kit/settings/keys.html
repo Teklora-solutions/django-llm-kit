@@ -12,11 +12,11 @@
         <td class="llm-kit-key-status">{% if key.works is True %}Yes{% elif key.works is False %}<span title="{{ key.check_error }}">No</span>{% else %}Not tested{% endif %}</td>
         <td>{% if editable %}<form method="post" action="{% url 'llm_kit:settings-key-test' key.id %}">
           <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">
+          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}"><input type="hidden" name="next" value="{{ next }}">
           <button type="submit">Test</button></form>
           <form method="post" action="{% url 'llm_kit:settings-key-remove' key.id %}">
           <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">
+          <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}"><input type="hidden" name="next" value="{{ next }}">
           <button type="submit">Remove</button></form>{% endif %}</td>
       </tr>
     {% empty %}
@@ -27,7 +27,7 @@
   {% if editable %}
   <form class="llm-kit-key-add" method="post" action="{% url 'llm_kit:settings-key-add' %}" autocomplete="off">
     <input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}">
-    <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="scope" value="{{ scope }}"><input type="hidden" name="scope_id" value="{{ scope_id }}"><input type="hidden" name="next" value="{{ next }}">
     <label>Provider <input name="provider" list="llm-kit-providers" required></label>
     <datalist id="llm-kit-providers">{% for p in providers %}<option value="{{ p }}">{% endfor %}</datalist>
     <label>API key <input type="password" name="key" required></label>

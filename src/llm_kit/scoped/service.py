@@ -24,8 +24,40 @@ class UnknownSetting(LookupError):
 # ------------------------------------------------------------------ who
 
 
+class Target:
+    """A platform admin acting on another tenant's or user's values (``target``)."""
+
+    def __init__(self, user, ids: dict[str, str | None]) -> None:
+        self.user, self.ids = user, ids
+
+    @property
+    def tenant_id(self) -> str | None:
+        return self.ids.get("tenant")
+
+    tenant = None
+
+
+def target(who, scope: str, scope_id: Any = None):
+    """``who`` itself, or, with ``scope_id``, the tenant or user with that id. Only someone who may
+    edit the platform scope may act on another tenant or user (``NotPermitted`` otherwise)."""
+    if scope_id in (None, ""):
+        return who
+    if not can_edit(who, "platform"):
+        raise NotPermitted("Only platform admins can manage another tenant's or user's settings.")
+    ids: dict[str, str | None] = {"platform": "", "tenant": None, "user": None}
+    if scope in ("tenant", "member"):
+        ids["tenant"] = str(scope_id)
+    elif scope == "user":
+        ids["user"] = str(scope_id)
+    else:
+        raise ValueError(f"scope_id only applies to tenant, member and user scopes, not {scope!r}.")
+    return Target(getattr(who, "user", who), ids)
+
+
 def scope_ids(who) -> dict[str, str | None]:
     """The id each scope has for ``who`` (a ``Caller``, an ``Owner`` or a user): None when it has none."""
+    if isinstance(who, Target):
+        return dict(who.ids)
     user = getattr(who, "user", who)
     tenant = getattr(who, "tenant_id", None)
     signed_in = user is not None and bool(getattr(user, "is_authenticated", False))
@@ -45,6 +77,8 @@ def can_edit(who, scope: str) -> bool:
         return False
     if scope_ids(who).get(scope) is None:
         return False
+    if scope != "platform" and _platform_editor(user):  # your admins may change every scope
+        return True
     hook = (conf.get("SCOPE_PERMISSIONS") or {}).get(scope)
     if hook:
         from llm_kit.core.graphs import import_target
@@ -54,6 +88,27 @@ def can_edit(who, scope: str) -> bool:
     if scope == "platform":
         return bool(user.has_perm("llm_kit.change_scopedsetting"))
     return scope == "user"
+
+
+def _platform_editor(user) -> bool:
+    hook = (conf.get("SCOPE_PERMISSIONS") or {}).get("platform")
+    if hook:
+        from llm_kit.core.graphs import import_target
+
+        return bool((import_target(hook) if isinstance(hook, str) else hook)(user, None))
+    return bool(user.has_perm("llm_kit.change_scopedsetting"))
+
+
+def members(tenant_id: Any) -> list[str] | None:
+    """The user ids of a tenant's members, from ``LLM_KIT["TENANT_MEMBERS"]`` (``fn(tenant_id) ->
+    users or ids``), or None when it isn't set."""
+    hook = conf.get("TENANT_MEMBERS")
+    if not hook or tenant_id in (None, ""):
+        return None
+    from llm_kit.core.graphs import import_target
+
+    found = (import_target(hook) if isinstance(hook, str) else hook)(tenant_id)
+    return [str(getattr(m, "pk", m)) for m in found]
 
 
 # ------------------------------------------------------------------ values
