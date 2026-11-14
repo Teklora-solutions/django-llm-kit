@@ -69,6 +69,11 @@ DEFAULTS: dict[str, Any] = {
     # and whose keys touchpoints use unless Settable(keys=...) says (a KeyPolicy value).
     "BYOK_SCOPES": (),
     "KEY_POLICY": "platform_only",
+    # Budgets saved per tenant, member or user (llm_kit.scoped.budgets): the periods they may
+    # use (names, or {"name": "dotted.path:fn(now) -> start"}), and who may set each kind:
+    # {"tenant" | "member" | "user": ["platform" | "tenant" | "user", ...]}. Empty = nobody.
+    "BUDGET_PERIODS": ("day", "month"),
+    "BUDGET_EDITORS": {},
     # Model tools: dotted path to fn(user) -> tenant (instance or id) for the run's caller.
     "TENANT_RESOLVER": None,
     # Agents: how deep subagents may nest (0 = no delegation), how many hand-offs one request

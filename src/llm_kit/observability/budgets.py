@@ -21,6 +21,47 @@ SCOPES = ("user", "tenant")
 KEYS = (*SCOPES, "touchpoints")  # touchpoints: checked on each call (llm_kit.core.observability.spend)
 
 
+def spent_since(start, **where: Any) -> Decimal:
+    """USD recorded since ``start`` for the given ``LLMCall`` filters."""
+    from django.db.models import Sum
+
+    from llm_kit.models import LLMCall
+
+    total = LLMCall.objects.filter(started_at__gte=start, **where).aggregate(total=Sum("cost"))["total"]
+    return total or Decimal(0)
+
+
+def seed(key, start) -> Decimal:
+    """Recorded spend for a ``SpendKey`` since ``start`` (the tracker's database read)."""
+    where: dict[str, Any] = {}
+    if key.touchpoint:
+        where["touchpoint"] = key.touchpoint
+    if key.scope in ("tenant", "user"):
+        where[key.scope] = key.scope_id
+    elif key.scope == "member":
+        where["tenant"], _, where["user"] = key.scope_id.partition(":")
+    if key.counts == "platform_keys":
+        where["key_owner__in"] = ["", "platform"]
+    return spent_since(start, **where)
+
+
+def period_start(period: str):
+    """When the current ``period`` started, in local time: ``day``, ``week`` (Monday), ``month``,
+    or a period from ``BUDGET_PERIODS`` given as ``{"name": "dotted.path:fn(now) -> start"}``."""
+    from django.utils import timezone
+
+    from llm_kit.core.observability.spend import default_period_start
+
+    now = timezone.localtime()
+    custom = conf.get("BUDGET_PERIODS")
+    if isinstance(custom, dict) and custom.get(period):
+        from llm_kit.core.graphs import import_target
+
+        fn = custom[period]
+        return (import_target(fn) if isinstance(fn, str) else fn)(now)
+    return default_period_start(period, now)
+
+
 def spent_today(**where: Any) -> Decimal:
     """USD recorded since local midnight for ``user=`` or ``tenant=`` (as recorded: strings)."""
     from django.db.models import Sum

@@ -34,6 +34,8 @@ LLM_KIT = {
 | `SCOPE_PERMISSIONS` | `{}` | who may change each scope's saved settings: `{"platform" \| "tenant" \| "user": "dotted.path:fn(user, tenant) -> bool"}` ([details](../guides/settings.md#who-may-change-what)) |
 | `BYOK_SCOPES` | `()` | scopes that may store their own provider keys: `"tenant"`, `"user"` ([bring your own key](../guides/settings.md#bring-your-own-key)) |
 | `KEY_POLICY` | `"platform_only"` | whose keys touchpoints use unless `Settable(keys=)` says: `platform_only`, `own_only`, `own_then_platform`, `tenant_chooses` |
+| `BUDGET_PERIODS` | `("day", "month")` | periods tenant, member and user budgets may use; names, or `{"name": "dotted.path:fn(now) -> start"}` |
+| `BUDGET_EDITORS` | `{}` | who may set each kind of budget: `{"tenant" \| "member" \| "user": ["platform" \| "tenant" \| "user"]}` ([budgets](../guides/settings.md#budgets)) |
 | `TENANT_RESOLVER` | `None` | dotted path to `fn(user) -> tenant`, or `fn(user, request=None, scope=None)` to pick a tenant per request ([users in several tenants](../guides/access.md#users-in-several-tenants)); scopes threads, model tools and call records |
 
 ## Models and keys

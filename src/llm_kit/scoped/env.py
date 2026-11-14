@@ -19,6 +19,12 @@ class ScopedEnv:
     def for_caller(self, caller) -> ScopedEnv:
         return ScopedEnv(self.base, caller)
 
+    def check_budgets(self, tp) -> None:
+        """``BudgetExceeded`` when a budget limiting this caller's calls of ``tp`` is used up."""
+        from llm_kit.scoped.budgets import check_all
+
+        check_all(self.caller, tp)
+
     # ------------------------------------------------------------ keys (BYOK)
 
     def key_policy(self, tp) -> str:

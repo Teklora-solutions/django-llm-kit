@@ -96,6 +96,47 @@ DELETE llm/api/keys/<id>/?scope=tenant
 
 `providers` lists the providers your touchpoints call, to fill a dropdown. Anyone in the scope can list its keys. Adding and removing keys follows `SCOPE_PERMISSIONS`, as for settings. The model options in `llm/api/settings/` count the keys the asker brought.
 
+## Budgets
+
+Tenants and users can have their own spending limits, and you decide who sets them: your admins (a plan's limit), a tenant's managers (a cap for each member), or users themselves.
+
+```python
+LLM_KIT = {
+    "BUDGET_PERIODS": ["day", "month"],          # or {"quarter": "myapp.billing:quarter_start"}
+    "BUDGET_EDITORS": {                          # kind of budget -> scopes that may set it
+        "tenant": ["platform"],                  # a workspace's total, set by you
+        "member": ["platform", "tenant"],        # each member of a workspace, set by you or its managers
+        "user": ["user"],                        # a user's own cap
+    },
+}
+```
+
+| Budget scope | Limits |
+|---|---|
+| `tenant` | everything a workspace's members spend together |
+| `member` | each member of a workspace, separately |
+| `user` | one user, across workspaces |
+
+A budget has a period, an amount in USD, an optional touchpoint (blank means all of them), and `counts`. Set `counts` to `"platform_keys"` to leave out calls made with keys the tenant or user [brought](#bring-your-own-key), so a plan limit covers only what you pay for. Periods are `day`, `week` (from Monday) and `month` in your time zone, or your own as `{"name": "dotted.path:fn(now) -> start"}`. Only the periods listed in `BUDGET_PERIODS` can be used. No one can set budgets until `BUDGET_EDITORS` says who.
+
+Before every call (`model()`, `complete()`, `embed()`), each budget that applies to the caller is checked against a running total, without a database query per call (see [budgets](agents.md#budgets) for how the total is kept). Once a budget is used up, the call raises `BudgetExceeded`, for example "The workspace budget of $50 is used up ($50.12 spent this month).", and an agent stops with `stopped="budget"`. Your admins can set any tenant's or user's budget under **Scoped budgets** in the Django admin.
+
+```
+GET    llm/api/budgets/?scope=tenant
+PUT    llm/api/budgets/   {"scope": "member", "period": "day", "amount": "2", "touchpoint": "", "counts": "all"}
+DELETE llm/api/budgets/   {"scope": "member", "period": "day"}
+```
+
+`GET` returns what a UI needs to show "$3.10 of $10 this month":
+
+```json
+{"scope": "tenant", "periods": ["day", "month"], "editable": false,
+ "budgets": [{"scope": "tenant", "touchpoint": "", "period": "month", "amount": "10", "counts": "all",
+              "spent": "3.1000", "remaining": "6.9000", "resets_at": "2026-12-01T00:00:00+03:00"}]}
+```
+
+The budget always belongs to the requester's own tenant or user. `editable` says whether they may change it.
+
 ## Who may change what
 
 `LLM_KIT["SCOPE_PERMISSIONS"]` maps a scope to `fn(user, tenant) -> bool`:

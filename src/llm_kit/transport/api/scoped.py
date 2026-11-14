@@ -186,3 +186,63 @@ class KeyDetailView(APIView):
         except service.NotPermitted as e:
             return Response({"detail": str(e)}, status=403)
         return Response(status=204 if removed else 404)
+
+
+class BudgetsView(APIView):
+    """Spending limits, with what has been spent: ``GET llm/api/budgets/?scope=tenant|member|user``;
+    ``PUT {"scope", "period", "amount", "touchpoint"?, "counts"?}`` sets one; ``DELETE {"scope",
+    "period", "touchpoint"?}`` removes it. Who may set each scope's budgets: ``BUDGET_EDITORS``."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from llm_kit.scoped import budgets
+
+        scope = request.query_params.get("scope", "user")
+        if scope not in budgets.BUDGET_SCOPES:
+            return Response({"detail": f"scope must be one of {', '.join(budgets.BUDGET_SCOPES)}."}, status=400)
+        owner = SettingsView._owner(self, request)
+        try:
+            listed = budgets.list_for(owner, scope)
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=404)
+        return Response(
+            {
+                "scope": scope,
+                "periods": budgets.periods(),
+                "editable": budgets.can_set(owner, scope),
+                "budgets": listed,
+            }
+        )
+
+    def _change(self, request, saving: bool):
+        from llm_kit.scoped import budgets
+
+        data = request.data if isinstance(request.data, dict) else {}
+        owner = SettingsView._owner(self, request)
+        scope, period, touchpoint = (
+            str(data.get("scope") or ""),
+            str(data.get("period") or ""),
+            data.get("touchpoint") or "",
+        )
+        try:
+            if saving:
+                if "amount" not in data:
+                    return Response({"detail": "Give an amount (USD)."}, status=400)
+                return Response(
+                    budgets.set_budget(
+                        owner, scope, period, data["amount"], touchpoint=touchpoint, counts=data.get("counts") or "all"
+                    )
+                )
+            removed = budgets.remove_budget(owner, scope, period, touchpoint=touchpoint)
+        except service.NotPermitted as e:
+            return Response({"detail": str(e)}, status=403)
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=400)
+        return Response(status=204 if removed else 404)
+
+    def put(self, request):
+        return self._change(request, saving=True)
+
+    def delete(self, request):
+        return self._change(request, saving=False)

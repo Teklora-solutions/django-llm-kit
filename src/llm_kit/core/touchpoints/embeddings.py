@@ -209,6 +209,8 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
 
     check_daily_budget(tp)
     env = tp.env_for(config_, env or default_env())
+    if (check_budgets := getattr(env, "check_budgets", None)) is not None:
+        check_budgets(tp)
     resolution = tp.resolve(requested, config=config_, env=env)
     if not fallbacks:
         resolution.fallbacks = []
