@@ -306,6 +306,9 @@ async def aexecute(run_id: str) -> None:
     finally:
         watchdog.cancel()
         executors.unregister_local(run.run_id)
+        from llm_kit.background.events import flush
+
+        await flush(run.run_id)  # your own events go out before the final status
     # Only if still running: a run marked lost meanwhile (heartbeats delayed) stays lost, and was
     # announced as lost already.
     ended = await BackgroundRun.objects.filter(pk=run.pk, status="running").aupdate(

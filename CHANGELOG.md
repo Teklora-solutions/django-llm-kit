@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- `background.publish(target, event)` / `apublish`: send your own events (named with a dot, like `myapp.outcome`) to a background run's watchers, before its final `status`. `target` is a hook's `RunSetup`, a run's config, a `BackgroundRun` or an id; `background.run_id_of(target)` gives the id. Outside a background run nothing is sent.
+
 - `background.active_run(thread)` is now exported from `llm_kit.background`: the thread's queued or running background run, or `None`.
 
 - `touchpoint(..., adapt_input=fn)` and `model(adapt_input=)`: `fn(input, ref, info)` is called for each model just before it is tried, fallbacks included, so each gets input it can read (audio or a transcript; a file reference only the provider that holds it can open). It works for invoke, ainvoke, stream and astream, after `bind_tools` and `with_structured_output`, and before the rate-limit slot. It may be async. A model it raises for is skipped.

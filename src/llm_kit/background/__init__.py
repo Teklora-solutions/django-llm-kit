@@ -15,6 +15,7 @@ streaming guide). Where runs execute: ``RUN_EXECUTOR``; how events reach watcher
 ``RUN_EVENTS``.
 """
 
+from llm_kit.background.events import apublish, publish, run_id_of
 from llm_kit.background.service import (
     RunBusy,
     aadvance,
@@ -39,12 +40,15 @@ __all__ = [
     "active_run",
     "advance",
     "aexecute",
+    "apublish",
     "astart",
     "cancel",
     "execute",
     "get_run",
+    "publish",
     "refresh",
     "run_finished",
+    "run_id_of",
     "runs_for",
     "start",
     "waiting_runs",

@@ -129,6 +129,8 @@ Bad payloads and callers over a daily budget are refused when you start it (400,
 
 Events aren't stored. A watcher who joins mid-reply sees the rest of that reply's tokens, and the whole message in the next snapshot. A slow watcher misses tokens rather than slowing the run; it never misses other events. Reconnecting gives a new snapshot.
 
+**Your own events.** A run hook's context manager, a tool or a callback can send watchers something only your code knows, such as how a turn ended: `background.publish(target, {"event": "myapp.outcome", "data": {...}})` (or `await background.apublish(...)`). `target` is the hook's `RunSetup`, the run's `config`, a `BackgroundRun` or its id; `background.run_id_of(target)` gives the id, or `None`. Watchers get it like the kit's events, before the final `status`. The name needs a dot (the kit's own never have one), `data` must be JSON, and outside a background run nothing is sent and it returns `False`.
+
 A run that ends at an `interrupt()` has status `interrupted` with the question in `result.interrupts`. Answer with a new run on the thread: `{"resume": …}`, in the background or not.
 
 ### Queued follow-ups
