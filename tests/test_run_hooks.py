@@ -336,3 +336,62 @@ def test_background_subagents_and_their_reports_keep_the_context(world, settings
     task.cancel()
     report = BackgroundRun.objects.get(reports_on=task)
     assert report.context == {"channel": "chat"}
+
+
+# ------------------------------------------------------------------ your own events to watchers
+
+
+@contextlib.contextmanager
+def _sync_outcome(run):
+    yield
+    assert background.publish(run, {"event": "test.outcome", "data": {"by": "sync"}})
+
+
+@contextlib.asynccontextmanager
+async def _async_outcome(run):
+    yield
+    assert await background.apublish(run.config, {"event": "test.outcome", "data": {"by": "async"}})
+
+
+def outcome_hook(run):
+    return [_sync_outcome(run), _async_outcome(run)]
+
+
+@pytest.fixture
+def published(monkeypatch):
+    from llm_kit.background import bus
+
+    sent = []
+
+    class Recorder:
+        async def publish(self, run_id, event):
+            sent.append((run_id, event))
+
+    monkeypatch.setattr(bus, "get_bus", lambda: Recorder())
+    return sent
+
+
+def test_a_hook_sends_its_own_events_before_the_final_status(user, settings, published):
+    _hooks(settings, "outcome_hook")
+    settings.LLM_KIT = {**settings.LLM_KIT, "RUN_EXECUTOR": "tests.test_run_hooks:noop"}
+    thread = Thread.objects.create(graph="chat", user=user)
+    run = background.start(thread, {"message": "hi"}, user=user)
+    background.execute(run.run_id)
+    names = [e["event"] for rid, e in published if rid == run.run_id]
+    mine = [e["data"]["by"] for _, e in published if e["event"] == "test.outcome"]
+    assert sorted(mine) == ["async", "sync"]
+    assert names[-1] == "status" and names.index("test.outcome") > names.index("end")
+
+
+def test_publishing_outside_a_background_run_sends_nothing(published):
+    assert background.run_id_of({"configurable": {}}) is None
+    assert background.publish({"configurable": {}}, {"event": "test.outcome"}) is False
+    assert background.publish("some-run", {"event": "test.outcome", "data": [1]}) is True
+    assert published == [("some-run", {"event": "test.outcome", "data": [1]})]
+
+
+def test_your_events_need_a_dotted_name_and_json_data():
+    with pytest.raises(ValueError, match="dot"):
+        background.publish("r", {"event": "status", "data": {}})
+    with pytest.raises(ValueError, match="JSON"):
+        background.publish("r", {"event": "test.x", "data": object()})
