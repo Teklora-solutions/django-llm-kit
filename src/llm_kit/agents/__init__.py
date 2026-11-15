@@ -35,6 +35,7 @@ from llm_kit.core.agents import (
     agent,
     all_agents,
     get_agent,
+    time_left,
 )
 
 __all__ = [
@@ -54,5 +55,6 @@ __all__ = [
     "run",
     "start",
     "stream",
+    "time_left",
     "watch",
 ]

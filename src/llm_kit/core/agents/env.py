@@ -38,6 +38,17 @@ class AgentEnv:
     def override(self, name: str) -> AgentOverride | None:
         return None
 
+    # Tool calls under a time limit (see ``llm_kit.core.agents.toolcalls``).
+
+    def in_transaction(self) -> bool:
+        """Whether this thread is inside a database transaction (a sync tool then runs here)."""
+        return False
+
+    def run_tool_thread(self, call):
+        """Run a sync tool call on a tool thread; close what the thread opened (database
+        connections) when it ends, even when the call was abandoned long before."""
+        return call()
+
     # Background subagents: a framework that can run work detached from the request overrides these.
 
     def can_detach(self, config: Any) -> bool:

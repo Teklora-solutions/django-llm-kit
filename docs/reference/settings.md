@@ -71,6 +71,9 @@ LLM_KIT = {
 | `AGENT_MAX_DEPTH` | `2` | how deep subagents may nest (`0`: no delegation) |
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
+| `AGENT_ANSWER_RESERVE` | `25` | seconds of `AGENT_TIMEOUT` kept back for the answer: a tool call may take at most the rest, and with less than that left the agent answers without tools |
+| `TOOL_TIMEOUT` | `90` | seconds one tool call may take (`0`: no limit of its own); per tool `tools.register(..., timeout=)` |
+| `TOOL_THREADS` | `32` | threads that run sync tool calls under a time limit |
 | `DEFER_TOOLS_ABOVE` | `20` | agents with more tools than this load them on demand through `find_tools`, unless they declare `defer_tools` ([many tools](../guides/agents.md#many-tools)) |
 | `MAX_LOADED_TOOLS` | `15` | how many found tools stay bound, most recently found first |
 | `TOOL_SEARCH_TOUCHPOINT` | `None` | an embedding touchpoint; `find_tools` then searches by meaning as well as by words |

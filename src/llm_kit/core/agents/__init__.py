@@ -19,6 +19,7 @@ from llm_kit.core.agents.spec import (
     get_agent,
     problems,
 )
+from llm_kit.core.agents.toolcalls import time_left
 
 __all__ = [
     "AgentContext",
@@ -40,4 +41,5 @@ __all__ = [
     "root_config",
     "run",
     "set_default_env",
+    "time_left",
 ]

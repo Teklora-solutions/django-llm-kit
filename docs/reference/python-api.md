@@ -29,7 +29,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.agents`
 
-`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts.
+`run(name, task, *, user=None, tenant=None, thread_id=None, thread=None, join=True, retry=None, budget=None, **config) -> AgentResult`, `arun(...)`, `stream(...)` (async iterator of events). Inside a running agent, `run`/`arun` [join its request](../guides/agents.md#running-agents) unless `join=False`. `AgentResult` has `text`, `output`, `steps`, `stopped` and token counts. `time_left(config=None)`: seconds until the request's deadline, for tools ([time limits](../guides/agents.md#time-limits)); `None` outside an agent run.
 
 `agent(..., background_subagents=True | [names])`: subagents it may [start in the background](../guides/agents.md#in-the-background). `start(name, task, *, user=None, tenant=None, thread=None, model=None, queue=None) -> BackgroundRun`, `astart(...)`, `watch(run, after=None)`: run an agent [in the background](../guides/streaming.md#background-runs).
 
@@ -47,7 +47,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.tools`
 
-`expose(model, **options)`, `register(tool, *, permission=…, category=…)`, `select(*, names, categories, kinds)`, `for_user(user, tenant=…)`, `for_config(config)`, `all_tools()`, `guidance(tools)`, `pending_for(user)`, `approve(proposal, by)`, `reject(proposal, by, reason="")`, `PUBLIC`, `Caller`. See [Model tools](../guides/tools.md).
+`expose(model, **options)`, `register(tool, *, permission=…, category=…, timeout=None)`, `select(*, names, categories, kinds)`, `for_user(user, tenant=…)`, `for_config(config)`, `all_tools()`, `guidance(tools)`, `pending_for(user)`, `approve(proposal, by)`, `reject(proposal, by, reason="")`, `PUBLIC`, `Caller`. See [Model tools](../guides/tools.md).
 
 ## `llm_kit.catalogue`
 

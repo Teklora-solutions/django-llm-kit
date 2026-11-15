@@ -39,6 +39,7 @@ class ToolEntry:
     spec: AccessSpec | None = None
     inner: BaseTool | None = None
     metadata: dict = field(default_factory=dict)
+    timeout: float | None = None  # seconds one call may take; None: TOOL_TIMEOUT, 0: no limit of its own
 
     @property
     def writes(self) -> str:
@@ -85,13 +86,20 @@ class ToolEntry:
                 return refusal or await entry.inner.ainvoke(kwargs, entry._inner_config(who, config))
             return await sync_to_async(run, thread_sensitive=True)(config, **kwargs)
 
+        from llm_kit.core.agents.toolcalls import SYNC_KEY, TIMEOUT_KEY, is_async
+
+        metadata = {"llm_kit_category": self.category, "llm_kit_kind": self.kind, **self.metadata}
+        if self.timeout is not None:
+            metadata[TIMEOUT_KEY] = self.timeout
+        if self.kind != "custom" or not is_async(self.inner):
+            metadata[SYNC_KEY] = True  # its coroutine only hands sync work to a thread
         return StructuredTool(
             name=self.name,
             description=self.description,
             args_schema=self.args_schema,
             func=run,
             coroutine=arun,
-            metadata={"llm_kit_category": self.category, "llm_kit_kind": self.kind, **self.metadata},
+            metadata=metadata,
         )
 
 
@@ -126,6 +134,7 @@ def register(
     permission: Any,
     category: str = "custom",
     guidance: str = "",
+    timeout: float | None = None,
 ) -> BaseTool:
     """Add a hand-written tool to the catalogue, behind a permission (``"app.codename"``,
     ``tools.AUTHENTICATED``, ``tools.PUBLIC`` (anyone, including visitors and runs with no
@@ -134,6 +143,11 @@ def register(
         @functools.partial(tools.register, permission="crm.view_lead", category="crm")
         @langchain_core.tools.tool
         def lead_score(lead_id: int, config: RunnableConfig) -> str: ...
+
+    ``timeout``: seconds one call may take (default ``TOOL_TIMEOUT``; 0 for no limit of its
+    own). Past it the model gets an error result saying the tool didn't finish, and the run
+    goes on. Report a failure by raising ``langchain_core.tools.ToolException``: the model
+    reads its message as an error result.
     """
     inner = tool if isinstance(tool, BaseTool) else as_tool(tool)
     if permission is None:
@@ -153,6 +167,7 @@ def register(
                 args_schema=inner.args_schema,
                 guidance=guidance,
                 inner=inner,
+                timeout=timeout,
             )
         )
 

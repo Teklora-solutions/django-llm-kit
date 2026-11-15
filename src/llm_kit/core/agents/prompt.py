@@ -46,7 +46,9 @@ def render(prompt, ctx: PromptContext) -> str:
     return _VAR.sub(lambda m: str(ctx.vars[m.group(1)]) if m.group(1) in ctx.vars else m.group(0), prompt or "")
 
 
-def build_prompt(spec, ctx: PromptContext, *, guidance: str = "", subagents: list = (), last_step: bool = False) -> str:
+def build_prompt(
+    spec, ctx: PromptContext, *, guidance: str = "", subagents: list = (), last_step: bool = False, hurry: bool = False
+) -> str:
     parts = [render(spec.prompt, ctx).strip()]
     if guidance.strip():
         parts.append("## Tools\n" + guidance.strip())
@@ -57,6 +59,11 @@ def build_prompt(spec, ctx: PromptContext, *, guidance: str = "", subagents: lis
             "It does the work and replies with its answer. It doesn't see this conversation unless noted, so put "
             "everything it needs in the task.\n" + lines
         )
-    if last_step:
+    if hurry:
+        parts.append(
+            "Time is nearly up for this request. Don't call any tools: answer now with what you have "
+            "already found, and say plainly what you could not finish or check."
+        )
+    elif last_step:
         parts.append("This is your last step: answer now with what you have. Don't call any more tools.")
     return "\n\n".join(p for p in parts if p)

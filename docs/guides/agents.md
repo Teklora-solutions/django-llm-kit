@@ -92,6 +92,28 @@ model → tools → model, until the model answers or reaches `max_steps`. On it
 - `tools.select(names=…, categories=…, kinds=…)` picks registered tools lazily, per caller.
 - **Public tools:** a tool registered with `permission=tools.PUBLIC` is offered to anonymous visitors and to runs with no user (a Celery task). Use it only for tools that read public data. Tools generated from your models can't be public.
 - **Loading tools on demand:** see [many tools](#many-tools) below.
+- **Failures:** any exception from a tool becomes an error result (`status="error"`) that the model reads, and the run goes on.
+  - **Showing the reason:** report a failure by raising `langchain_core.tools.ToolException`; its message is what the model sees. A failure returned as a plain string looks like success to the model and to UIs.
+  - **Other exceptions:** only the exception's class name is shown (with `EXPOSE_ERRORS`, the message too). Invalid arguments are shown in full, so the model can correct its call.
+- **Time limits:** each tool call has a time limit; see [Time limits](#time-limits) below.
+
+### Time limits
+
+Each tool call may take at most `TOOL_TIMEOUT` seconds (90). Set it per tool with `tools.register(..., timeout=30)`, or `metadata={"llm_kit_timeout": 30}` on a tool object; `0` means no limit of its own.
+
+- **Past the limit:** the call ends as an error result saying the tool didn't finish and its result is unknown. The model reads that and goes on: it can try something else, or answer with what it has. LangChain's callbacks record the call as failed, not left open.
+- **Async tools** are cancelled at the limit.
+- **Sync tools** run on a thread of their own (a pool of `TOOL_THREADS`, 32), because a Python thread can't be stopped. At the limit the call is abandoned: it finishes on that thread and its result is dropped. The thread's database connections are checked before and after each call, as a request's are (`CONN_MAX_AGE` applies). ContextVars, and so `tools.caller_from()` and your run hooks' values, carry over. `threading.local` values don't.
+- **Inside a database transaction**, for example `ATOMIC_REQUESTS` or a test in Django's `TestCase`, a sync tool runs where it was called, because it must see the transaction's data. It can't be abandoned there.
+
+**The deadline leaves time to answer.** A request's agents have `AGENT_TIMEOUT` seconds (300), and `AGENT_ANSWER_RESERVE` (25) of those are kept back for the answer:
+
+- A tool call may take at most the time left less the reserve, if that is shorter than its own timeout.
+- With less than that left (under 5 seconds), no tool starts.
+- At that point the model is offered no tools and told to answer now with what it has, saying what it couldn't check. A tool call it makes anyway isn't run, and the run stops as `timeout`.
+- A subagent (`delegate`) isn't cut off by `TOOL_TIMEOUT`: it keeps to the same deadline itself, answering from what it has when time is nearly up.
+
+Tools can read the time left with `agents.time_left(config)`: seconds until the deadline, or `None` outside an agent run. Give a tool that works in steps (pages, retries) its own budget from it.
 
 ### Many tools
 
@@ -145,9 +167,11 @@ agent(
 | `AGENT_MAX_DEPTH` | `2` | how deep subagents may nest (`0`: no delegation) |
 | `AGENT_MAX_DELEGATIONS` | `8` | hand-offs per request, across all its agents |
 | `AGENT_TIMEOUT` | `300` | seconds after which a request's agents start no new model call |
+| `AGENT_ANSWER_RESERVE` | `25` | seconds of `AGENT_TIMEOUT` kept back for the answer: tools get no more than the rest ([time limits](#time-limits)) |
+| `TOOL_TIMEOUT` | `90` | seconds one tool call may take (`0`: no limit); per tool `register(..., timeout=)` |
 | `AGENT_BUDGET` | `None` | USD a request may spend before its agents start no new model call |
 
-No agent can hand work to itself or to an agent above it. The timeout is cooperative: it is checked before each model call and hand-off, and doesn't kill a call in progress.
+No agent can hand work to itself or to an agent above it. The timeout is cooperative for model calls: it is checked before each model call and hand-off, and doesn't stop a model call in progress. Tool calls have [their own limits](#time-limits).
 
 ## Budgets
 
