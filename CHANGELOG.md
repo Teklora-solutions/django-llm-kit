@@ -53,6 +53,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- Minimum versions that actually work: `langgraph-checkpoint>=4.3.0` (`DjangoSaver` needs `writes_sort_key`; with 4.1 Django failed at start-up), `langchain-core>=1.2.5` (what `langgraph-checkpoint` 4.3 needs, though it declares less) and `langgraph>=1.1.5` (earlier 1.x break with the `langgraph-prebuilt` they allow). CI now also runs on the lowest allowed versions (#35).
 - The SSE views read each event in a new task, so a ContextVar set during a run didn't reliably reach its later steps. They now read the whole run in one task.
 - Budget totals started at $0 recorded spend for up to 30 s on a freshly booted host (monotonic time under the refresh interval made a never-read total look fresh).
 - A tenant member could read another member's own budget and spend (`GET llm/api/budgets/?scope=member&member=<id>`). Seeing someone else's member budget now needs the same permission as setting it.

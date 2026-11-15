@@ -30,10 +30,10 @@ classifiers = [
 ]
 dependencies = [
     "django>=5.0",
-    "langgraph>=1.0",
-    "langgraph-checkpoint>=4.0",
+    "langgraph>=1.1.5",  # earlier 1.x break with the langgraph-prebuilt they allow
+    "langgraph-checkpoint>=4.3.0",  # writes_sort_key (DjangoSaver)
     "langchain>=1.0",
-    "langchain-core>=1.0",
+    "langchain-core>=1.2.5",  # what langgraph-checkpoint 4.3 needs (its own floor is too low)
 ]
 
 [project.urls]
@@ -65,7 +65,7 @@ dev = [
     "redis>=5",
     "pytest>=8",
     "pytest-django>=4.8",
-    "pytest-asyncio>=0.23",
+    "pytest-asyncio>=0.24",  # asyncio_default_fixture_loop_scope
     "ruff>=0.6",
 ]
 

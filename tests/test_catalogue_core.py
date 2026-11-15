@@ -246,8 +246,18 @@ def test_connect_tries_ipv4_first_and_falls_through(monkeypatch):
     v4b = (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.0.2.2", 443))
     monkeypatch.setattr(sync_mod.socket, "getaddrinfo", lambda *a, **k: [v6, v4a, v4b])
     attempts = []
+    import threading
+
+    real, here = socket.socket, threading.get_ident()
 
     class FakeSocket:
+        # socket.socket is replaced for the whole process: anything but _connect's own call
+        # (another thread, or an event loop's socketpair while fixtures run) gets a real one.
+        def __new__(cls, *args, **kwargs):
+            if threading.get_ident() != here or len(args) != 3 or kwargs:
+                return real(*args, **kwargs)
+            return super().__new__(cls)
+
         def __init__(self, family, type_, proto):
             self.family = family
 
