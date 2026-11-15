@@ -94,6 +94,11 @@ DEFAULTS: dict[str, Any] = {
     "TOOL_TIMEOUT": 90,
     # Threads that run sync tool calls (a stuck one holds its thread until it ends).
     "TOOL_THREADS": 32,
+    # The most inputs one embedding call to a model may take: {"vertex_ai/gemini-embedding-2": 1}
+    # (patterns; the most specific wins; 0 for no limit). Lists are split into calls of that size.
+    "EMBEDDING_BATCH_SIZE": {},
+    # Embedding calls an aembed() runs at once when it splits a list.
+    "EMBEDDING_CONCURRENCY": 4,
     # Tools loaded on demand (find_tools): agents with more tools than this defer them unless
     # they declare defer_tools; how many found tools stay bound (most recent first); and an
     # embedding touchpoint that lets find_tools search by meaning as well as by words.

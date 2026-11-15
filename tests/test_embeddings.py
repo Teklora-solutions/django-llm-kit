@@ -195,3 +195,100 @@ def test_a_touchpoints_own_backend_is_used_for_embeddings(settings):
     wrong = touchpoint("t.embed.wrong", default="openai/text-embedding-3-small", backend="tests.graphs:fake_backend")
     with pytest.raises(ConfigError, match="embedding_backend="):
         wrong.embed("x", env=FakeEnv(), fallbacks=False)
+
+
+# ------------------------------------------------------------------ one vector per input
+
+
+class Aggregating(Scripted):
+    """Like an embedContent model given a list: one vector for all of them, and no error."""
+
+    def embed(self, inputs, **params):
+        CALLS.append((self.ref, list(inputs), {**self.params, **params}))
+        return Embedded(vectors=[[float(len(inputs))] * 4], input_tokens=7, served_model=self.ref)
+
+
+def aggregating(ref, params, keys):
+    return (Aggregating if ref.startswith("vertex_ai/") else Scripted)(ref, params, keys)
+
+
+VERTEX = "vertex_ai/gemini-embedding-2"
+
+
+def test_a_model_that_returns_too_few_vectors_fails_loudly_and_falls_back(settings):
+    from llm_kit.core.touchpoints.embeddings import EmbeddingCountMismatch
+
+    settings.LLM_KIT = {
+        **settings.LLM_KIT,
+        "EMBEDDING_BACKEND": "tests.test_embeddings:aggregating",
+        "EMBEDDING_BATCH_SIZE": {VERTEX: 0},  # as if nothing knew this model's limit
+    }
+    with pytest.raises(EmbeddingCountMismatch, match=r"vertex_ai/gemini-embedding-2 returned 1 vectors for 3 inputs"):
+        tp(default=VERTEX, fallbacks=[]).embed(["a", "b", "c"], env=FakeEnv())
+    with pytest.raises(EmbeddingCountMismatch):
+        asyncio.run(tp(default=VERTEX, fallbacks=[]).aembed(["a", "b", "c"], env=FakeEnv()))
+    CALLS.clear()
+    vectors = tp(default=VERTEX).embed(["a", "bb"], env=FakeEnv())  # the fallback embeds them all again
+    assert vectors == [[1.0] * 4, [2.0] * 4] and [c[0] for c in CALLS] == [VERTEX, "openai/text-embedding-3-small"]
+
+
+def test_a_one_input_model_gets_one_call_per_input_in_order(settings):
+    settings.LLM_KIT = {**settings.LLM_KIT, "EMBEDDING_BACKEND": "tests.test_embeddings:aggregating"}
+    vectors = tp(default=VERTEX, fallbacks=[]).embed(["a", "b", "c"], env=FakeEnv())  # known: one at a time
+    assert [c[1] for c in CALLS] == [["a"], ["b"], ["c"]] and len(vectors) == 3
+
+    CALLS.clear()
+    vectors = asyncio.run(tp(default=VERTEX, fallbacks=[]).aembed(["a", "b", "c", "d", "e"], env=FakeEnv()))
+    assert sorted(c[1][0] for c in CALLS) == ["a", "b", "c", "d", "e"] and len(vectors) == 5
+
+
+def test_lists_are_split_into_the_configured_batch_size_in_order(settings):
+    settings.LLM_KIT = {**settings.LLM_KIT, "EMBEDDING_BATCH_SIZE": {"gemini/*": 2}}
+    inputs = ["a", "bb", "ccc", "dddd", "eeeee"]
+    assert tp().embed(inputs, env=FakeEnv()) == [[float(n)] * 4 for n in range(1, 6)]
+    assert [c[1] for c in CALLS] == [["a", "bb"], ["ccc", "dddd"], ["eeeee"]]
+    CALLS.clear()
+    assert asyncio.run(tp().aembed(inputs, env=FakeEnv())) == [[float(n)] * 4 for n in range(1, 6)]
+    assert len(CALLS) == 3
+
+
+def test_a_batch_that_fails_sends_the_whole_list_to_the_fallback(settings):
+    settings.LLM_KIT = {**settings.LLM_KIT, "EMBEDDING_BATCH_SIZE": {"gemini/*": 2}}
+    FAILURES["gemini/gemini-embedding-2"] = [None, ConnectionError("down")]  # the second batch fails
+    original = Scripted.embed
+
+    def embed(self, inputs, **params):
+        if FAILURES.get(self.ref) and FAILURES[self.ref][0] is None:
+            FAILURES[self.ref].pop(0)
+            CALLS.append((self.ref, list(inputs), {}))
+            return Embedded(vectors=[[0.0] * 4 for _ in inputs])
+        return original(self, inputs, **params)
+
+    Scripted.embed = embed
+    try:
+        vectors = tp().embed(["a", "bb", "ccc"], env=FakeEnv())
+    finally:
+        Scripted.embed = original
+    assert vectors == [[1.0] * 4, [2.0] * 4, [3.0] * 4]  # all from the fallback: never mixed
+    assert [c[0] for c in CALLS][-1] == "openai/text-embedding-3-small" and CALLS[-1][1] == ["a", "bb", "ccc"]
+
+
+def test_the_batch_size_comes_from_settings_the_backend_litellm_or_known_models(settings):
+    from llm_kit.core.touchpoints.embeddings import batch_size
+
+    class Small:
+        max_batch = 16
+
+    assert batch_size("openai/text-embedding-3-small") is None
+    assert batch_size("openai/text-embedding-3-small", Small()) == 16
+    assert batch_size(VERTEX) == 1 and batch_size("vertex_ai/gemini-embedding-001") is None
+    settings.LLM_KIT = {**settings.LLM_KIT, "EMBEDDING_BATCH_SIZE": {"openai/*": 100, VERTEX: 0}}
+    assert batch_size("openai/text-embedding-3-small", Small()) == 100 and batch_size(VERTEX) is None
+
+
+def test_litellm_says_which_models_take_one_input():
+    pytest.importorskip("litellm")
+    from llm_kit.core.touchpoints.embeddings import _litellm_batch_size
+
+    assert _litellm_batch_size("vertex_ai/gemini-embedding-2") == 1
+    assert _litellm_batch_size("gemini/gemini-embedding-2") is None

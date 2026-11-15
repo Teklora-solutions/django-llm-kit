@@ -13,6 +13,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 | `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None, adapt_input=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint`. `adapt_input(input, ref, info)` gives [each model input it can read](../guides/touchpoints.md#input-for-each-model) |
 | `RetryPolicy(attempts=0, max_wait=0.0)`, `RetryPolicy.BATCH`, `.INTERACTIVE`, `.NEVER` | how long a call waits out a [short rate limit](../guides/touchpoints.md#rate-limits-and-fallbacks) before falling back |
 | `AllModelsFailed` | raised when every model of a touchpoint failed; `errors` is `[(model, exception), …]` |
+| `embed(inputs, **params)`, `aembed(...)` | one vector per input, lists [split into the model's batch size](../guides/touchpoints.md#one-vector-per-input); `EmbeddingCountMismatch` (`llm_kit.core.touchpoints.embeddings`) when a model returns a different number |
 | `get_touchpoint(name)` | a declared touchpoint |
 | `ServerChoice(on_requested="ignore")`, `ClientChoice(allow=("*",), requires={}, max_price_input=None, max_price_output=None, on_disallowed="reject", use_fallbacks=True)` | model choice policies |
 | `agent(name, *, description, touchpoint, prompt, tools, subagents, output, max_steps, fork, defer_tools, essential, history, tool_result_chars)` | declare an [agent](../guides/agents.md); `@agent.code(name, …)` for Python agents |

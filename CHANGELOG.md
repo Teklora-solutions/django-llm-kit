@@ -74,6 +74,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- Embeddings always come back one vector per input.
+  - **The bug:** on Vertex AI, Gemini embedding models other than `gemini-embedding-001` embed a list as one input. Through LiteLLM, `embed([t1, …, tN])` silently returned a single vector, and a caller pairing vectors with passages stored the wrong ones.
+  - **Splitting:** lists are now split into calls of at most the model's batch size, in order: `EMBEDDING_BATCH_SIZE`, a backend's `max_batch`, LiteLLM's model info, then llm-kit's list (one input for those Vertex models). Each call takes its own rate-limit slot and is recorded, and `aembed()` runs up to `EMBEDDING_CONCURRENCY` at once.
+  - **A wrong count is an error:** a reply with a different number of vectors raises `EmbeddingCountMismatch`, naming the model, and the next fallback embeds the whole list again.
 - The Postgres checkpointer no longer races to create its tables. LangGraph's `setup()` reads the highest applied migration, then inserts the missing ones. On a fresh database, or after an upgrade that adds a migration, two event loops or processes starting together inserted the same version, and a run failed with `UniqueViolation` on `checkpoint_migrations_pkey`. Setup now runs once per process and database, under a Postgres advisory lock.
 - Minimum versions that actually work: `langgraph-checkpoint>=4.3.0` (`DjangoSaver` needs `writes_sort_key`; with 4.1 Django failed at start-up), `langchain-core>=1.2.5` (what `langgraph-checkpoint` 4.3 needs, though it declares less) and `langgraph>=1.1.5` (earlier 1.x break with the `langgraph-prebuilt` they allow). CI now also runs on the lowest allowed versions (#35).
 - The SSE views read each event in a new task, so a ContextVar set during a run didn't reliably reach its later steps. They now read the whole run in one task.
