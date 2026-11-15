@@ -119,6 +119,8 @@ run.cancel()
 
 Bad payloads and callers over a daily budget are refused when you start it (400, 429). A thread runs one at a time: starting another, or a normal run, while one is going is refused (409, `RunBusy`, WebSocket `busy`) with the run in progress, unless you [queue it](#queued-follow-ups).
 
+`background.active_run(thread)` returns the thread's queued or running run, or `None` (a run whose worker stopped is marked `lost` first). Use it to tell someone their message will be answered after the current one, or for a status command. It queries the database: from async code, wrap it in `sync_to_async`.
+
 **Watching** (`GET llm/runs/<id>/watch/`, WebSocket `watch`, or `async for event in background.watch(run)`) gives:
 
 1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`), the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far, and the runs waiting on the thread (`queue`);
