@@ -24,10 +24,23 @@ Backends: ``touchpoint(..., embedding_backend=)``, else the touchpoint's ``backe
 ``params`` (touchpoint, admin override and per call) go to the backend; ``dimensions``
 is the common name for the output size (OpenAI's ``dimensions``, Gemini's
 ``output_dimensionality`` through LiteLLM).
+
+**One vector per input, always.** A list is split into calls of at most the model's batch
+size, in order: ``EMBEDDING_BATCH_SIZE`` (``{"vertex_ai/gemini-embedding-2": 1}``, patterns,
+the most specific wins), else the backend's own ``max_batch``, else what LiteLLM knows (a
+model on Google's ``embedContent`` endpoint takes one input per call: given several, it embeds
+them as one), else no limit. Each call takes its own rate-limit slot and is recorded; async
+calls run up to ``EMBEDDING_CONCURRENCY`` at a time. A reply with a different number of
+vectors than inputs is an error (``EmbeddingCountMismatch``), never a short list. When a model
+fails part-way, the next fallback embeds the whole list again: vectors from different models
+can't be mixed.
 """
 
 from __future__ import annotations
 
+import asyncio
+import fnmatch
+import functools
 import logging
 import random
 import threading
@@ -39,7 +52,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from llm_kit.core import config
-from llm_kit.core.errors import AllModelsFailed, ConfigError
+from llm_kit.core.errors import AllModelsFailed, ConfigError, LLMKitError
 from llm_kit.core.graphs import import_target
 from llm_kit.core.touchpoints.env import KEYLESS_PROVIDERS, provider_of
 from llm_kit.core.touchpoints.retry import RetryPolicy
@@ -54,6 +67,15 @@ class Embedded:
     vectors: list[list[float]]
     input_tokens: int | None = None
     served_model: str = ""
+
+
+class EmbeddingCountMismatch(LLMKitError):
+    """A model returned a different number of vectors than it was given inputs."""
+
+    def __init__(self, model: str, inputs: int, vectors: int) -> None:
+        self.model, self.inputs, self.vectors = model, inputs, vectors
+        hint = " It may embed a list as one input: set EMBEDDING_BATCH_SIZE for it to 1." if vectors < inputs else ""
+        super().__init__(f"{model} returned {vectors} vectors for {inputs} inputs.{hint}")
 
 
 @runtime_checkable
@@ -187,6 +209,60 @@ def backend_for(tp) -> Any:
     return getattr(tp, "embedding_backend", None) or tp.backend or None
 
 
+# ------------------------------------------------------------------ batch sizes
+
+# Models that take one input per call whatever you send (Vertex AI's embedContent endpoint).
+# LiteLLM's model info says so too (``uses_embed_content``); this covers other backends.
+KNOWN_BATCH_SIZES: dict[str, int] = {
+    "vertex_ai/gemini-embedding-*": 1,
+    "vertex_ai/gemini-embedding-001": 0,  # batchEmbedContents-style: no limit of ours
+}
+
+
+def _specificity(pattern: str) -> tuple[int, int]:
+    wild = any(c in pattern for c in "*?[")
+    return (0 if wild else 1, len(pattern.replace("*", "")))
+
+
+def _lookup(table: dict[str, Any], ref: str) -> Any:
+    if ref in table:
+        return table[ref]
+    matching = [p for p in table if fnmatch.fnmatchcase(ref, p)]
+    return table[max(matching, key=_specificity)] if matching else None
+
+
+@functools.lru_cache(maxsize=512)
+def _litellm_batch_size(ref: str) -> int | None:
+    from llm_kit.core.touchpoints.backends import _litellm_installed
+
+    if not _litellm_installed():
+        return None
+    try:
+        info = _litellm().get_model_info(ref)
+    except Exception:
+        return None
+    return 1 if info.get("uses_embed_content") else None
+
+
+def batch_size(ref: str, embedder: Any = None) -> int | None:
+    """The most inputs one call to ``ref`` may take (None: no limit)."""
+    for size in (
+        _lookup(config.get("EMBEDDING_BATCH_SIZE") or {}, ref),
+        getattr(embedder, "max_batch", None),
+        _litellm_batch_size(ref) if isinstance(embedder, LiteLLMEmbedder) else None,
+        _lookup(KNOWN_BATCH_SIZES, ref),
+    ):
+        if size is not None:
+            return int(size) or None
+    return None
+
+
+def _batches(inputs: list[Any], size: int | None) -> list[list[Any]]:
+    if not size or len(inputs) <= size:
+        return [inputs]
+    return [inputs[i : i + size] for i in range(0, len(inputs), size)]
+
+
 # ------------------------------------------------------------------ calling
 
 
@@ -262,59 +338,106 @@ def _running():
     return running_config()
 
 
-def run_sync(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list[float]]:
+class _Failed(Exception):
+    """This candidate failed for good (after its retry waits)."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+
+
+def _checked(ref: str, batch: list[Any], result: Embedded) -> Embedded:
+    if len(result.vectors) != len(batch):
+        raise EmbeddingCountMismatch(ref, len(batch), len(result.vectors))
+    return result
+
+
+def _one_sync(call: _Call, index: int, ref: str, embedder, batch: list[Any], extra) -> list[list[float]]:
     from llm_kit.core.touchpoints import backends
 
+    attempt = 0
+    while True:
+        if (refused := _slot(call, index, ref)) is not None:
+            raise _Failed(refused)
+        rec, t0 = _start(call, ref, index, batch, call.owners[index] if call.owners else "platform")
+        try:
+            result = _checked(ref, batch, embedder.embed(batch, **extra))
+        except Exception as e:
+            _end(rec, t0, batch, error=e)
+            delay = None if isinstance(e, EmbeddingCountMismatch) else call.retry.delay(e, attempt)
+            if delay is None:
+                raise _Failed(e) from e
+            attempt += 1
+            backends._sleep(delay)
+            continue
+        _end(rec, t0, batch, result=result)
+        _count(call, index, ref, result)
+        return result.vectors
+
+
+async def _one_async(call: _Call, index: int, ref: str, embedder, batch: list[Any], extra) -> list[list[float]]:
+    from llm_kit.core.touchpoints import backends
+
+    attempt = 0
+    while True:
+        if (refused := await _aslot(call, index, ref)) is not None:
+            raise _Failed(refused)
+        rec, t0 = _start(call, ref, index, batch, call.owners[index] if call.owners else "platform")
+        try:
+            result = _checked(ref, batch, await embedder.aembed(batch, **extra))
+        except Exception as e:
+            _end(rec, t0, batch, error=e)
+            delay = None if isinstance(e, EmbeddingCountMismatch) else call.retry.delay(e, attempt)
+            if delay is None:
+                raise _Failed(e) from e
+            attempt += 1
+            await backends._asleep(delay)
+            continue
+        _end(rec, t0, batch, result=result)
+        _count(call, index, ref, result)
+        return result.vectors
+
+
+def run_sync(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list[float]]:
     errors: list[tuple[str, BaseException]] = []
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
-        attempt = 0
-        while True:
-            if (refused := _slot(call, index, ref)) is not None:
-                errors.append((ref, refused))
-                break
-            rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
-            try:
-                result = embedder.embed(inputs, **extra)
-            except Exception as e:
-                _end(rec, t0, inputs, error=e)
-                delay = call.retry.delay(e, attempt)
-                if delay is None:
-                    errors.append((ref, e))
-                    break
-                attempt += 1
-                backends._sleep(delay)
-                continue
-            _end(rec, t0, inputs, result=result)
-            _count(call, index, ref, result)
-            return result.vectors
+        vectors: list[list[float]] = []
+        try:
+            for batch in _batches(inputs, batch_size(ref, embedder)):
+                vectors += _one_sync(call, index, ref, embedder, batch, extra)
+        except _Failed as failed:
+            errors.append((ref, failed.error))
+            continue
+        return vectors
     raise _failure(call, errors)
 
 
 async def run_async(call: _Call, inputs: list[Any], extra: dict[str, Any]) -> list[list[float]]:
-    from llm_kit.core.touchpoints import backends
-
     errors: list[tuple[str, BaseException]] = []
+    limit = max(1, int(config.get("EMBEDDING_CONCURRENCY") or 1))
     for index, (ref, embedder) in enumerate(zip(call.refs, call.embedders, strict=True)):
-        attempt = 0
-        while True:
-            if (refused := await _aslot(call, index, ref)) is not None:
-                errors.append((ref, refused))
-                break
-            rec, t0 = _start(call, ref, index, inputs, call.owners[index] if call.owners else "platform")
+        batches = _batches(inputs, batch_size(ref, embedder))
+        if len(batches) == 1:
             try:
-                result = await embedder.aembed(inputs, **extra)
-            except Exception as e:
-                _end(rec, t0, inputs, error=e)
-                delay = call.retry.delay(e, attempt)
-                if delay is None:
-                    errors.append((ref, e))
-                    break
-                attempt += 1
-                await backends._asleep(delay)
+                return await _one_async(call, index, ref, embedder, batches[0], extra)
+            except _Failed as failed:
+                errors.append((ref, failed.error))
                 continue
-            _end(rec, t0, inputs, result=result)
-            _count(call, index, ref, result)
-            return result.vectors
+        gate = asyncio.Semaphore(limit)
+
+        async def one(batch, ref=ref, embedder=embedder, index=index, gate=gate):
+            async with gate:
+                return await _one_async(call, index, ref, embedder, batch, extra)
+
+        tasks = [asyncio.ensure_future(one(b)) for b in batches]
+        try:
+            parts = await asyncio.gather(*tasks)
+        except _Failed as failed:
+            for task in tasks:  # this model has failed: don't spend more calls on it
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            errors.append((ref, failed.error))
+            continue
+        return [vector for part in parts for vector in part]
     raise _failure(call, errors)
 
 

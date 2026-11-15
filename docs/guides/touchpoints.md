@@ -181,6 +181,21 @@ Embeddings have their own backend setting, `LLM_KIT["EMBEDDING_BACKEND"]`. One t
 | `"langchain"` | `init_embeddings` with the provider's `langchain-*` package; text only |
 | `"myapp.ai:embedder"` | your own `fn(ref, params, api_keys)` returning a LangChain `Embeddings`, or an object with `embed(inputs, **params)` and `aembed(...)` that return `Embedded(vectors, input_tokens)` (from `llm_kit.core.touchpoints.embeddings`). Use this for a provider SDK's multimodal inputs |
 
+### One vector per input
+
+Some models take only one input per call. On Vertex AI, Gemini embedding models other than `gemini-embedding-001` use the `embedContent` endpoint, which embeds a list as one input and returns a single vector for all of it. llm-kit always returns one vector per input:
+
+- **Splitting:** a list is split into calls of at most the model's batch size, and the vectors come back in order. The batch size is the first of:
+  1. `LLM_KIT["EMBEDDING_BATCH_SIZE"]`, for example `{"vertex_ai/gemini-embedding-2": 1, "openai/*": 2048}`. Patterns are allowed and the most specific wins; `0` means no limit.
+  2. Your backend's `max_batch` attribute.
+  3. What LiteLLM knows about the model (with the `litellm` backend).
+  4. llm-kit's own list: one input for `vertex_ai/gemini-embedding-*` except `-001`.
+- **Each call counts:** it takes its own [rate-limit](#your-accounts-rate-limits) slot and is recorded. `aembed()` runs up to `EMBEDDING_CONCURRENCY` (4) calls at once.
+- **A wrong count is an error.** A reply with a different number of vectors than inputs raises `EmbeddingCountMismatch`, naming the model. It is never a short list that would pair vectors with the wrong passages.
+- **Fallbacks:** when a model fails part-way through a list, the next fallback embeds the whole list again, because vectors from different models can't be mixed.
+
+For a large one-off job where latency doesn't matter, such as re-embedding a whole corpus, consider your provider's batch API (Vertex AI batch prediction, for one). It runs outside llm-kit, often at a lower price; check your provider's pricing.
+
 ## API keys
 
 Keys are looked up in this order:
