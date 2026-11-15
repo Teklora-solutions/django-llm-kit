@@ -49,7 +49,7 @@ Everything model-related goes through a **touchpoint**, so every call is checked
 
 - Python 3.11+
 - Django 5.0+ (5.1+ recommended for SQLite's `transaction_mode`)
-- LangGraph 1.0+ and LangChain 1.0+
+- LangGraph 1.1.5+ (with langgraph-checkpoint 4.3+) and LangChain 1.0+ (langchain-core 1.2.5+)
 - An ASGI server (Daphne, Uvicorn) for streaming. Under WSGI the SSE views work, but buffer the whole reply.
 
 ## For AI assistants

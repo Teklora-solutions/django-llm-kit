@@ -22,7 +22,7 @@ Use LangGraph and LangChain in Django the Django way. Declare your models, agent
 pip install "django-llm-kit[all]"   # drf + channels + litellm + crypto + otel; or pick extras
 ```
 
-Requires Python 3.11+, Django 5.0+, LangGraph 1.0+ and LangChain 1.0+.
+Requires Python 3.11+, Django 5.0+, LangGraph 1.1.5+ and LangChain 1.0+ (langchain-core 1.2.5+).
 
 ## Quick start
 
