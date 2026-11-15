@@ -67,6 +67,9 @@ class Touchpoint:
     daily_budget: Any = None  # USD per day across all its calls; None = no limit
     settable: Any = None  # a core.scoped.Settable: what tenants and users may save for it
     embedding_backend: Any = None  # embed()'s backend when it differs from backend=; None = backend=
+    # fn(input, ref, info) -> input, called for each model just before it is tried (also after a
+    # fallback), so each gets input it can read; a dotted path or a callable.
+    adapt_input: Any = None
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -112,6 +115,7 @@ class Touchpoint:
         retry: RetryPolicy | dict | str | None = None,
         fallbacks: bool = True,
         caller: Any = None,
+        adapt_input: Any = None,
         **params: Any,
     ) -> Runnable:
         """A chat model for this touchpoint, wrapped with its fallbacks.
@@ -123,7 +127,8 @@ class Touchpoint:
         The returned runnable supports ``invoke``/``stream``/``bind_tools``/``with_structured_output``.
         ``caller`` (a ``Caller``, an ``Owner`` or a user) is who the call is for, outside a request or
         agent run: their saved settings, keys and budgets apply (invoke with ``run_config(config)``
-        so it is recorded for them too).
+        so it is recorded for them too). ``adapt_input`` replaces the touchpoint's for this call
+        (``False``: none).
         """
         from llm_kit.core.observability.spend import check_daily_budget
         from llm_kit.core.touchpoints.backends import build_for
@@ -140,7 +145,9 @@ class Touchpoint:
             resolution.params = {**resolution.params, **params}
         # Inside a running agent, its retry policy applies (but not its requested model).
         run = config if config is not None else _running()
-        return build_for(self, resolution, env or default_env(), retry=policy_for(self, run, retry))
+        return build_for(
+            self, resolution, env or default_env(), retry=policy_for(self, run, retry), adapt_input=adapt_input
+        )
 
     # ------------------------------------------------------- one-shot calls
 
@@ -371,6 +378,7 @@ def touchpoint(
     daily_budget: Any = None,
     settable: Any = None,
     embedding_backend: Any = None,
+    adapt_input: Any = None,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads).
 
@@ -379,7 +387,13 @@ def touchpoint(
     sets or overrides it without a deploy). ``settable`` (a ``Settable``) lets tenants and users
     save a model choice and parameters for it (see ``llm_kit.scoped``). ``embed()`` uses
     ``embedding_backend``, else ``backend`` (a name, dotted path or factory), else
-    ``LLM_KIT["EMBEDDING_BACKEND"]``."""
+    ``LLM_KIT["EMBEDDING_BACKEND"]``.
+
+    ``adapt_input`` (``fn(input, ref, info) -> input``, or its dotted path) is called for each
+    model just before that model is tried, fallbacks included, with the model's ref and catalogue
+    entry (``ModelInfo`` or None): give each model input it can read (audio it can hear, or a
+    transcript; a file reference only the provider that holds the file can open). It may be async
+    in async calls. If it raises, that model is skipped."""
     tp = Touchpoint(
         name=name,
         default=default,
@@ -394,6 +408,7 @@ def touchpoint(
         daily_budget=daily_budget,
         settable=settable,
         embedding_backend=embedding_backend,
+        adapt_input=adapt_input,
     )
     with _lock:
         _registry[name] = tp

@@ -130,6 +130,26 @@ Set `LLM_KIT["MODEL_BACKEND"]`, or `touchpoint(..., backend=…)` for one touchp
 
 Your factory may build a model once and return the same object every time, for example to keep its HTTP client. llm-kit never changes the model it gets. The touchpoint's metadata, tags and recording handler are added as call config: `model()` returns the factory's model wrapped in a `TouchpointModel` (a `RunnableBinding`; the model is `.bound`, attributes are forwarded). `bind_tools` and `with_structured_output` keep that config, and a call is recorded once even if you also pass llm-kit's handler yourself.
 
+## Input for each model
+
+Fallbacks don't all read the same input. One model hears audio, another needs a transcript. A file uploaded to one provider can only be opened by that provider. `adapt_input` gives each model input it can read:
+
+```python
+def media_for(input, ref, info):
+    """Called for each model just before it is tried, fallbacks included."""
+    hears_audio = bool(info and "audio" in (info.values.get("input_modalities") or []))
+    return with_media(input, audio=hears_audio, files_api=ref.startswith("gemini/"))
+
+assistant = touchpoint("support.assistant", default=..., fallbacks=[...], adapt_input="myapp.media:media_for")
+assistant.model(config=config, adapt_input=other_fn)   # for one call; adapt_input=False: none
+```
+
+- It gets the input as passed to the model (a string, messages, or a prompt value), the model's `ref`, and its catalogue entry (`ModelInfo`, or `None` when the catalogue doesn't know it). It returns that model's input.
+- It runs for `invoke`, `ainvoke`, `stream` and `astream`, after `bind_tools` and `with_structured_output` too, once per model (not per retry wait), and before the model's [rate limit](#your-accounts-rate-limits) slot is taken.
+- It may be an `async def`; then it is awaited in async calls (and run on an event loop in sync ones).
+- If it raises, that model is skipped like one that failed, and the next fallback is tried. The error is kept in `AllModelsFailed`, or raised as it is when there was no other model.
+- Recording sees what each model was actually sent. The prompt is stored only when [content capture](#recording-content) is on.
+
 ## Embeddings
 
 A touchpoint can embed as well as chat. Embedding calls go through the same resolution, admin overrides, API keys, fallbacks, retry waits and circuit breaker, and are recorded as calls with `kind="embedding"`:

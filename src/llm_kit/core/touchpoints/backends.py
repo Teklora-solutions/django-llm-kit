@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import json
 import logging
 import os
@@ -116,6 +117,8 @@ class TouchpointChatModel(RunnableWithFallbacks):
     touchpoint: str = ""
     limiter: Any = None  # ratelimit.Limiter: a slot per call, for candidates on the platform's keys
     owners: list[str] = []  # whose keys each candidate uses (BYOK keys aren't your account's limits)
+    adapt: Any = None  # fn(input, ref, info) -> input, run for each candidate before it is called
+    infos: list[Any] = []  # each candidate's catalogue entry (ModelInfo) or None, for ``adapt``
 
     def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> TouchpointChatModel:
         return self._map(lambda m: m.bind_tools(tools, **kwargs))
@@ -133,6 +136,8 @@ class TouchpointChatModel(RunnableWithFallbacks):
             touchpoint=self.touchpoint,
             limiter=self.limiter,
             owners=self.owners,
+            adapt=self.adapt,
+            infos=self.infos,
         )
 
     @property
@@ -158,6 +163,38 @@ class TouchpointChatModel(RunnableWithFallbacks):
                 policy.attempts,
             )
         return delay
+
+    # -------------------------------------------------------------- input per candidate
+
+    def _info(self, index: int) -> Any:
+        return self.infos[index] if index < len(self.infos) else None
+
+    def _adapt_failed(self, index: int, e: BaseException) -> BaseException:
+        logger.warning(
+            "%s: adapt_input failed for %s (%s: %s); trying the next model",
+            self.touchpoint or "touchpoint",
+            self._ref(index),
+            type(e).__name__,
+            e,
+        )
+        return e
+
+    def _adapted(self, index: int, input: Any) -> Any:
+        """``input`` as candidate ``index`` should get it (sync calls)."""
+        if self.adapt is None:
+            return input
+        out = self.adapt(input, self._ref(index), self._info(index))
+        if inspect.isawaitable(out):  # an async adapter, from a sync call
+            from asgiref.sync import async_to_sync
+
+            out = async_to_sync(_awaited)(out)
+        return out
+
+    async def _aadapted(self, index: int, input: Any) -> Any:
+        if self.adapt is None:
+            return input
+        out = self.adapt(input, self._ref(index), self._info(index))
+        return await out if inspect.isawaitable(out) else out
 
     # -------------------------------------------------------------- rate limits
 
@@ -227,6 +264,11 @@ class TouchpointChatModel(RunnableWithFallbacks):
         run_manager = self._start(input, config, get_callback_manager_for_config(config))
         errors: list[tuple[str, BaseException]] = []
         for index, runnable in enumerate(self.runnables):
+            try:
+                candidate_input = self._adapted(index, input)
+            except Exception as e:
+                errors.append((self._ref(index), self._adapt_failed(index, e)))
+                continue
             attempt = 0
             while True:
                 if (refused := self._slot(index)) is not None:
@@ -235,7 +277,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
-                        output = context.run(runnable.invoke, input, child, **kwargs)
+                        output = context.run(runnable.invoke, candidate_input, child, **kwargs)
                 except self.exceptions_to_handle as e:
                     delay = self._wait_for(e, attempt, index)
                     if delay is None:
@@ -259,6 +301,11 @@ class TouchpointChatModel(RunnableWithFallbacks):
         run_manager = await self._start(input, config, get_async_callback_manager_for_config(config))
         errors: list[tuple[str, BaseException]] = []
         for index, runnable in enumerate(self.runnables):
+            try:
+                candidate_input = await self._aadapted(index, input)
+            except Exception as e:
+                errors.append((self._ref(index), self._adapt_failed(index, e)))
+                continue
             attempt = 0
             while True:
                 if (refused := await self._aslot(index)) is not None:
@@ -267,7 +314,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
-                        coro = context.run(runnable.ainvoke, input, child, **kwargs)
+                        coro = context.run(runnable.ainvoke, candidate_input, child, **kwargs)
                         output = await coro_with_context(coro, context)
                 except self.exceptions_to_handle as e:
                     delay = self._wait_for(e, attempt, index)
@@ -296,6 +343,11 @@ class TouchpointChatModel(RunnableWithFallbacks):
         errors: list[tuple[str, BaseException]] = []
         stream = None
         for index, runnable in enumerate(self.runnables):
+            try:
+                candidate_input = self._adapted(index, input)
+            except Exception as e:
+                errors.append((self._ref(index), self._adapt_failed(index, e)))
+                continue
             attempt = 0
             while stream is None:
                 if (refused := self._slot(index)) is not None:
@@ -304,7 +356,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
-                        candidate = context.run(runnable.stream, input, child, **kwargs)
+                        candidate = context.run(runnable.stream, candidate_input, child, **kwargs)
                         chunk = context.run(next, candidate)
                     stream, streamed = candidate, index
                 except self.exceptions_to_handle as e:
@@ -344,6 +396,11 @@ class TouchpointChatModel(RunnableWithFallbacks):
         errors: list[tuple[str, BaseException]] = []
         stream = None
         for index, runnable in enumerate(self.runnables):
+            try:
+                candidate_input = await self._aadapted(index, input)
+            except Exception as e:
+                errors.append((self._ref(index), self._adapt_failed(index, e)))
+                continue
             attempt = 0
             while stream is None:
                 if (refused := await self._aslot(index)) is not None:
@@ -352,7 +409,7 @@ class TouchpointChatModel(RunnableWithFallbacks):
                 try:
                     child = patch_config(config, callbacks=run_manager.get_child())
                     with set_config_context(child) as context:
-                        candidate = runnable.astream(input, child, **kwargs)
+                        candidate = runnable.astream(candidate_input, child, **kwargs)
                         chunk = await coro_with_context(anext(candidate), context)
                     stream, streamed = candidate, index
                 except self.exceptions_to_handle as e:
@@ -389,6 +446,10 @@ class TouchpointChatModel(RunnableWithFallbacks):
     # One call per input through the loop above, instead of RunnableWithFallbacks' batching.
     batch = Runnable.batch
     abatch = Runnable.abatch
+
+
+async def _awaited(awaitable):
+    return await awaitable
 
 
 def _sleep(seconds: float) -> None:
@@ -472,7 +533,9 @@ def get_factory(name: str | None) -> Factory:
     return _factories[name]
 
 
-def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy | None = None) -> Runnable:
+def build_for(
+    tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy | None = None, adapt_input: Any = None
+) -> Runnable:
     """The runnable for a resolution: the chat model itself when there is one candidate and
     nothing to wait for, otherwise a ``TouchpointChatModel`` (fallbacks and/or retry waits)."""
     factory = get_factory(tp.backend)
@@ -489,7 +552,8 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
     handler = get_handler()
     limiter_for = getattr(env, "rate_limiter", None)
     limiter = limiter_for() if callable(limiter_for) else None
-    models, refs, owners = [], [], []
+    adapt = load_adapter(tp.adapt_input if adapt_input is None else adapt_input)
+    models, refs, owners, infos = [], [], [], []
     for index, ref in enumerate(resolution.candidates):
         for owner, keys in key_sets(env, ref, tp):  # one attempt per owner (BYOK: theirs, then yours)
             built = factory(ref, dict(resolution.params), keys)
@@ -504,9 +568,10 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
             models.append(model)
             refs.append(ref)
             owners.append(owner)
+            infos.append(_lookup(env, ref) if adapt is not None else None)
     if not models:
         raise no_key(tp, resolution.candidates)
-    if len(models) == 1 and not (retry and retry.waits) and limiter is None:
+    if len(models) == 1 and not (retry and retry.waits) and limiter is None and adapt is None:
         return models[0]
     return TouchpointChatModel(
         runnable=models[0],
@@ -516,7 +581,27 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
         touchpoint=tp.name,
         limiter=limiter,
         owners=owners,
+        adapt=adapt,
+        infos=infos,
     )
+
+
+def load_adapter(value: Any) -> Callable[..., Any] | None:
+    """``adapt_input``: a callable or a dotted path to one; ``None``/``False`` for none."""
+    if value is None or value is False:
+        return None
+    if isinstance(value, str):
+        value = import_target(value)
+    if not callable(value):
+        raise ConfigError(f"adapt_input must be fn(input, ref, info) or a dotted path to one, not {value!r}.")
+    return value
+
+
+def _lookup(env: ResolutionEnv, ref: str) -> Any:
+    try:
+        return env.lookup(ref)
+    except Exception:
+        return None
 
 
 def key_sets(env: ResolutionEnv, ref: str, tp=None) -> list[tuple[str, list[str]]]:
