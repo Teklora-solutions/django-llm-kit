@@ -123,11 +123,27 @@ Bad payloads and callers over a daily budget are refused when you start it (400,
 
 **Watching** (`GET llm/runs/<id>/watch/`, WebSocket `watch`, or `async for event in background.watch(run)`) gives:
 
-1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`), the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far, and the runs waiting on the thread (`queue`);
+1. `snapshot`: the run (`id`, `status`, timestamps, `result`, `error`), the thread's saved state (`values`, `next`, `interrupts`), so a late watcher sees what has been done so far, the runs waiting on the thread (`queue`), and `seq`, the last event it covers;
 2. the run's events from then on, the same as a normal run's (`token`, `message`, `update`, `interrupt`, `end`, `error`);
 3. a final `status` event once it has finished; the stream then closes.
 
-Events aren't stored. A watcher who joins mid-reply sees the rest of that reply's tokens, and the whole message in the next snapshot. A slow watcher misses tokens rather than slowing the run; it never misses other events. Reconnecting gives a new snapshot.
+**From any point.** Every event of a background run has `seq`: 1, 2, 3, … with no gaps (the SSE `id:`, and `"seq"` in WebSocket messages). The run's events are kept for a while, so you can watch from where you were instead of from a snapshot:
+
+- `background.watch(run, after=n)`, `GET llm/runs/<id>/watch/?after=n`, or WebSocket `{"type": "watch", "run": "<id>", "after": n}` give the events after `n`, then live ones. `after=0` is every event from the first.
+- A browser's `EventSource` reconnects with a `Last-Event-ID` header, and the watch view picks up after it: a dropped connection loses nothing.
+- Starting a background run over SSE or WebSocket streams it from its first event, with no snapshot. Events sent before the stream subscribed aren't lost.
+- A slow watcher doesn't slow the run. If its queue fills up, it reads what it missed from the log.
+- If events it asked for are no longer kept, it gets a `snapshot` with `"resync": true` first. That snapshot replaces what the watcher has, and the events after it follow.
+
+The log is capped at `RUN_EVENT_LOG_SIZE` events per run (2,000) and dropped `RUN_EVENT_LOG_TTL` seconds after the run's last event (300). Size it like this: a token event is roughly 150 bytes, so 1,000 runs finishing within the TTL, each streaming 1,000 tokens, keep about 150 MB. Writes are batched: the process running the run writes tokens at most every 100 ms, and other events at once, so a token never costs its own cache write. Watchers read the log only when they start and when they find a gap.
+
+Where it's kept is `RUN_EVENT_LOG`:
+
+- `"auto"` (the default) uses the Django cache `RUN_EVENT_LOG_CACHE` (`"default"`) when it is shared (Redis, Memcached), and this process's memory otherwise.
+- `"cache"` or `"memory"` picks one.
+- `"off"` keeps nothing: live events only, with no `seq`.
+
+With workers, use a shared cache. The system check `llm_kit.W003` warns about a worker executor with a log in memory. Events your code [publishes](#background-runs) from a process that isn't running the run reach watchers live, without `seq`, and aren't kept.
 
 **Your own events.** A run hook's context manager, a tool or a callback can send watchers something only your code knows, such as how a turn ended: `background.publish(target, {"event": "myapp.outcome", "data": {...}})` (or `await background.apublish(...)`). `target` is the hook's `RunSetup`, the run's `config`, a `BackgroundRun` or its id; `background.run_id_of(target)` gives the id, or `None`. Watchers get it like the kit's events, before the final `status`. The name needs a dot (the kit's own never have one), `data` must be JSON, and outside a background run nothing is sent and it returns `False`.
 

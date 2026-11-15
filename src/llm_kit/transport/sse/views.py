@@ -33,8 +33,9 @@ from llm_kit.runtime.graphs import UnknownGraph, default_graph_name, get_graph
 logger = logging.getLogger("llm_kit")
 
 
-def sse(event: str, data) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
+def sse(event: str, data, seq: int | None = None) -> str:
+    head = f"id: {seq}\n" if seq is not None else ""  # a reconnecting EventSource sends it back
+    return f"{head}event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
 _DONE = object()
@@ -74,7 +75,7 @@ async def with_keepalive(events: AsyncIterator[dict], interval: float) -> AsyncI
                 return
             if isinstance(item, BaseException):
                 raise item
-            yield sse(item["event"], item["data"])
+            yield sse(item["event"], item["data"], item.get("seq"))
     finally:
         if not task.done():
             task.cancel()  # the client left: stop the run's stream (a background run carries on)
@@ -151,7 +152,8 @@ async def stream(request, thread_id=None):
             if created:
                 yield {"event": "thread", "data": {"id": thread.thread_id, "graph": thread.graph}}
             yield {"event": "run", "data": {"id": run.run_id, "status": run.status}}
-            async for item in background.watch(run):  # leaving stops the watching, not the run
+            # From its first event. Leaving stops the watching, not the run.
+            async for item in background.watch(run, after=0):
                 yield item
 
         return _event_stream(watching())
@@ -201,7 +203,8 @@ def _get_run(request, run_id):
 @require_GET
 async def watch(request, run_id):
     """``GET llm/runs/<id>/watch/``: a background run's snapshot, then its events live, ending
-    with a ``status`` event once it has finished. Reconnecting gives a fresh snapshot."""
+    with a ``status`` event once it has finished. With ``?after=<seq>`` or a ``Last-Event-ID``
+    header (an ``EventSource`` reconnecting sends it), the events after that one instead."""
     from llm_kit import background
     from llm_kit.models import BackgroundRun
 
@@ -212,4 +215,12 @@ async def watch(request, run_id):
         run = await sync_to_async(_get_run)(request, run_id)
     except (BackgroundRun.DoesNotExist, access.NotAllowed):
         return _error(404, "Run not found.")
-    return _event_stream(background.watch(run))
+    after = request.GET.get("after", request.headers.get("Last-Event-ID"))
+    if after is not None:
+        try:
+            after = int(after)
+        except ValueError:
+            return _error(400, "after must be an event's seq (a whole number).")
+        if after < 0:
+            return _error(400, "after must be an event's seq (a whole number).")
+    return _event_stream(background.watch(run, after=after))

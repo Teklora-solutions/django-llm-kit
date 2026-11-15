@@ -88,9 +88,10 @@ async def test_sse_background_run_carries_on_after_the_stream_closes(async_clien
     await async_client.aforce_login(user)
     response = await post(async_client, "/llm/stream/", {"message": "hey", "graph": "gated", "background": True})
     stream = response.streaming_content.__aiter__()
-    first = [await stream.__anext__() for _ in range(3)]  # thread, run, snapshot
-    names = [chunk.decode().split("\n")[0] for chunk in first]
-    assert names == ["event: thread", "event: run", "event: snapshot"]
+    first = [(await stream.__anext__()).decode() for _ in range(3)]  # thread, run, its first event
+    names = [next(line for line in chunk.split("\n") if line.startswith("event: ")) for chunk in first]
+    assert names == ["event: thread", "event: run", "event: status"]
+    assert first[2].startswith("id: 1\n")  # the starter gets the run's events from the first
     await stream.aclose()  # the visitor leaves
 
     run = await BackgroundRun.objects.aget()
@@ -153,7 +154,7 @@ async def test_websocket_background_run_survives_a_disconnect(user, gate):
     assert (await c.connect())[0]
     await c.send_json_to({"type": "run", "message": "hey", "graph": "gated", "background": True})
     events = [await c.receive_json_from(timeout=10) for _ in range(3)]
-    assert [e["event"] for e in events] == ["thread", "run", "snapshot"]
+    assert [e["event"] for e in events] == ["thread", "run", "status"] and events[2]["seq"] == 1
     run_id = events[1]["data"]["id"]
     await c.disconnect()
 
@@ -181,7 +182,7 @@ async def test_websocket_cancel_stops_the_watched_run(user):
     assert (await c.connect())[0]
     await c.send_json_to({"type": "run", "message": "x", "background": True})
     assert (await c.receive_json_from(timeout=10))["event"] == "run"
-    assert (await c.receive_json_from(timeout=10))["event"] == "snapshot"
+    assert (await c.receive_json_from(timeout=10))["seq"] == 1
     run = await BackgroundRun.objects.aget()
     await sync_to_async(wait_for)(run, "running")
     await c.send_json_to({"type": "cancel"})

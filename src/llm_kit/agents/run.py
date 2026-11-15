@@ -395,9 +395,10 @@ async def astart(name: str, task: str, **kwargs):
     return await sync_to_async(start)(name, task, **kwargs)
 
 
-def watch(run) -> AsyncIterator[dict]:
+def watch(run, after: int | None = None) -> AsyncIterator[dict]:
     """A background run's events: a ``snapshot`` of where it is, then what it does, until a final
-    ``status`` event. ``run`` is a ``BackgroundRun`` (check the watcher may see it first)."""
+    ``status`` event; with ``after=n``, the events after ``seq`` ``n`` (``0``: from the first).
+    ``run`` is a ``BackgroundRun`` (check the watcher may see it first)."""
     from llm_kit import background
 
-    return background.watch(run)
+    return background.watch(run, after=after)

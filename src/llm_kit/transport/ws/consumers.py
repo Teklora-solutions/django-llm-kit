@@ -13,11 +13,13 @@ Client -> server::
     {"type": "run", "message": "hi", "background": true} # start detached, and watch it
     {"type": "run", "message": "hi", "queue": true}      # the same, waiting its turn if busy
     {"type": "watch", "run": "<run id>"}                  # watch a background run
+    {"type": "watch", "run": "<run id>", "after": 41}     # ... from the event after seq 41
     {"type": "cancel"}                                    # stop the run (or the one watched)
 
 Server -> client: ``{"event": ..., "data": ...}`` with the events listed in
 ``llm_kit.runtime.runs``, plus ``thread`` (new thread created), ``cancelled`` and ``busy``,
-and for background runs ``run``, ``snapshot`` and ``status``. Disconnecting stops a run started
+and for background runs ``run``, ``snapshot`` and ``status``; a background run's events carry
+``seq``. Disconnecting stops a run started
 on this connection, but never a background run: it carries on, and can be watched again.
 """
 
@@ -79,8 +81,11 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         if self.task and not self.task.done():
             self.task.cancel()
 
-    async def send_event(self, event: str, data=None):
-        await self.send_json({"event": event, "data": data})
+    async def send_event(self, event: str, data=None, seq: int | None = None):
+        message = {"event": event, "data": data}
+        if seq is not None:
+            message["seq"] = seq
+        await self.send_json(message)
 
     async def receive_json(self, content, **kwargs):
         kind = content.get("type") if isinstance(content, dict) else None
@@ -97,7 +102,11 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
             await self.send_event("busy", {"message": "A run is already in progress on this connection."})
             return
         if kind == "watch":
-            self.task = asyncio.create_task(self._watch(content.get("run")))
+            after = content.get("after")
+            if after is not None and (not isinstance(after, int) or isinstance(after, bool) or after < 0):
+                await self.send_event("error", {"message": "after must be an event's seq (a whole number)."})
+                return
+            self.task = asyncio.create_task(self._watch(content.get("run"), after=after))
         elif content.get("background") is True or content.get("queue") is True:
             self.task = asyncio.create_task(self._start_background(content))
         else:
@@ -108,7 +117,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
 
         return background.get_run(run_id, access.owner_from_scope(self.scope))
 
-    async def _watch(self, run_id, run=None):
+    async def _watch(self, run_id, run=None, after=None):
         from llm_kit import background
         from llm_kit.models import BackgroundRun
 
@@ -120,8 +129,8 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
                 return
         self.watched = run
         try:
-            async for item in background.watch(run):
-                await self.send_event(item["event"], item["data"])
+            async for item in background.watch(run, after=after):
+                await self.send_event(item["event"], item["data"], item.get("seq"))
         finally:
             self.watched = None
 
@@ -143,7 +152,7 @@ class ThreadConsumer(AsyncJsonWebsocketConsumer):
         if created:
             await self.send_event("thread", {"id": self.thread.thread_id, "graph": self.thread.graph})
         await self.send_event("run", {"id": run.run_id, "status": run.status})
-        await self._watch(None, run)
+        await self._watch(None, run, after=0)  # from its first event
 
     @database_sync_to_async
     def _prepare(self, payload):

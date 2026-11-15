@@ -116,6 +116,13 @@ DEFAULTS: dict[str, Any] = {
     # per call: "queue": true/false, start(..., queue=).
     "RUN_QUEUE": False,
     "RUN_EVENTS": "auto",
+    # Each background run's events, kept so a watcher can start from any point (watch(after=n)):
+    # "auto" (the cache below unless it is local memory, else this process), "cache", "memory"
+    # or "off" (live events only). Capped per run, and dropped TTL seconds after its last event.
+    "RUN_EVENT_LOG": "auto",
+    "RUN_EVENT_LOG_CACHE": "default",
+    "RUN_EVENT_LOG_SIZE": 2000,
+    "RUN_EVENT_LOG_TTL": 300,
     "RUN_LOST_AFTER": 60,
 }
 

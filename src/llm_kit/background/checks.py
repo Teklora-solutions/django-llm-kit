@@ -30,3 +30,26 @@ def worker_events_reach_watchers(app_configs=None, **kwargs):
             )
         ]
     return []
+
+
+@checks.register("llm_kit")
+def worker_events_are_kept_where_watchers_read(app_configs=None, **kwargs):
+    """A log in process memory can't be read by watchers in other processes."""
+    from llm_kit import conf
+    from llm_kit.background.log import MemoryStore, get_log
+    from llm_kit.core.errors import ConfigError
+
+    try:
+        log = get_log()
+    except ConfigError as e:
+        return [checks.Error(str(e), id="llm_kit.E002")]
+    if conf.get("RUN_EXECUTOR") == "thread" or log is None or not isinstance(log.store, MemoryStore):
+        return []
+    return [
+        checks.Warning(
+            f"RUN_EXECUTOR={conf.get('RUN_EXECUTOR')!r} runs background runs in other processes, but their "
+            "event log is kept in process memory: watchers elsewhere can't replay what they missed.",
+            hint='Use a shared cache (Redis, Memcached) for RUN_EVENT_LOG_CACHE, or set RUN_EVENT_LOG = "off".',
+            id="llm_kit.W003",
+        )
+    ]

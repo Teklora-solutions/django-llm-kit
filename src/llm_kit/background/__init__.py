@@ -7,12 +7,14 @@ anyone allowed to use the thread can watch or cancel::
     ...
     async for event in background.watch(run):   # a snapshot, then live events
         ...
+    async for event in background.watch(run, after=41):  # every event after seq 41
+        ...
     run.cancel()
 
 Agents: ``llm_kit.agents.start(name, task, user=...)``. Over HTTP and WebSocket: send
 ``"background": true`` with a run, and watch with ``llm/runs/<id>/watch/`` (see the
 streaming guide). Where runs execute: ``RUN_EXECUTOR``; how events reach watchers:
-``RUN_EVENTS``.
+``RUN_EVENTS``; where they are kept for replay: ``RUN_EVENT_LOG``.
 """
 
 from llm_kit.background.events import apublish, publish, run_id_of

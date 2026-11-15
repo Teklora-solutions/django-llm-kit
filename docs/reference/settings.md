@@ -29,6 +29,10 @@ LLM_KIT = {
 | `RATE_LIMIT_BACKEND` | `"auto"` | where the counts live: `"auto"` (Redis when the default cache is Redis, else the cache), `"redis"`, `"cache"`, `"off"` |
 | `RUN_EXECUTOR` | `"thread"` | where [background runs](../guides/streaming.md#background-runs) execute: `"thread"`, `"celery"`, `"django_q"` or `"pkg.module:fn"` |
 | `RUN_EVENTS` | `"auto"` | how background runs' events reach watchers: `"channels"` (the channel layer), `"local"` (this process), `"auto"` (channels when `CHANNEL_LAYERS` is set) |
+| `RUN_EVENT_LOG` | `"auto"` | where background runs' events are kept so [watchers can start from any point](../guides/streaming.md#background-runs): `"cache"`, `"memory"` (this process), `"auto"` (the cache when it is shared, else memory), `"off"` |
+| `RUN_EVENT_LOG_CACHE` | `"default"` | the Django cache alias for `RUN_EVENT_LOG = "cache"` |
+| `RUN_EVENT_LOG_SIZE` | `2000` | events kept per run; older ones are dropped |
+| `RUN_EVENT_LOG_TTL` | `300` | seconds a run's events are kept after its last one |
 | `RUN_QUEUE` | `False` | background runs on a busy thread [wait their turn](../guides/streaming.md#queued-follow-ups) instead of being refused; per call `"queue"` |
 | `RUN_LOST_AFTER` | `60` | seconds without a heartbeat before a running background run is marked `lost` |
 

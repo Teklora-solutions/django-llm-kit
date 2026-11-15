@@ -6,6 +6,10 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Background runs keep their events, so a watcher can start from any point. Every event has `seq` (1, 2, 3, … with no gaps: the SSE `id:`, `"seq"` over WebSocket), and `watch(run, after=n)`, `?after=n`, a `Last-Event-ID` header or WebSocket `"after"` replay what came after `n`, then go on live. The starter, a late watcher and a reconnecting client miss nothing, and a watcher whose queue overflowed fills the gap from the log. If events asked for are gone, a `snapshot` with `"resync": true` comes first.
+  - The log is kept in the Django cache when it is shared, otherwise in memory (`RUN_EVENT_LOG`, `RUN_EVENT_LOG_CACHE`). It is capped at `RUN_EVENT_LOG_SIZE` (2,000) events per run and dropped after `RUN_EVENT_LOG_TTL` (300 s). Tokens are written in batches every 100 ms.
+  - The new system check `llm_kit.W003` warns about a worker executor with a log in memory.
+
 - `background.publish(target, event)` / `apublish`: send your own events (named with a dot, like `myapp.outcome`) to a background run's watchers, before its final `status`. `target` is a hook's `RunSetup`, a run's config, a `BackgroundRun` or an id; `background.run_id_of(target)` gives the id. Outside a background run nothing is sent.
 
 - `background.active_run(thread)` is now exported from `llm_kit.background`: the thread's queued or running background run, or `None`.
@@ -55,6 +59,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- Starting a background run over SSE or WebSocket streams it from its first event (`thread`, `run`, then the run's events with `seq`), instead of `run` then a `snapshot`. Watching a run (`watch/`, WebSocket `watch` without `after`) still begins with a `snapshot`.
 - A touchpoint's model is no longer changed by llm-kit. The touchpoint's metadata, tags and recording handler used to be set on the object the backend factory returned. A factory that returns one shared model (and llm-kit's own cached LiteLLM routers) gained another handler on every build, so calls were recorded more and more times. `model()` now returns the factory's model wrapped in a `TouchpointModel` (a `RunnableBinding`: the model is `.bound`, its attributes are forwarded, and `bind_tools`/`with_structured_output` keep the config). Code that checked `isinstance(tp.model(), SomeChatModel)` should check `.bound`.
 - `defer_tools` defaults to `None` (defer when there are more than `DEFER_TOOLS_ABOVE` tools) instead of `False`. Pass `defer_tools=False` to keep every tool bound.
 
