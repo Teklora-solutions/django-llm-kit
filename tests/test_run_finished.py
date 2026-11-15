@@ -96,7 +96,8 @@ def _finished(run, timeout=10):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         run.refresh_from_db()
-        if not run.active:
+        if not run.active:  # finished in the database; its thread may still be sending the signal
+            executors.join(run.run_id, max(0.1, deadline - time.monotonic()))
             return run
         finish(run, timeout=1) if run.status == "running" else time.sleep(0.02)
     raise AssertionError(f"run is still {run.status}")
