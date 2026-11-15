@@ -87,6 +87,13 @@ DEFAULTS: dict[str, Any] = {
     "AGENT_MAX_DEPTH": 2,
     "AGENT_MAX_DELEGATIONS": 8,
     "AGENT_TIMEOUT": 300,
+    # Kept back from AGENT_TIMEOUT for the model to answer: each tool call may take at most the
+    # time left less this, and with less than that left the agent is told to answer now.
+    "AGENT_ANSWER_RESERVE": 25,
+    # Seconds one tool call may take (0: no limit of its own); per tool: register(..., timeout=).
+    "TOOL_TIMEOUT": 90,
+    # Threads that run sync tool calls (a stuck one holds its thread until it ends).
+    "TOOL_THREADS": 32,
     # Tools loaded on demand (find_tools): agents with more tools than this defer them unless
     # they declare defer_tools; how many found tools stay bound (most recent first); and an
     # embedding touchpoint that lets find_tools search by meaning as well as by words.

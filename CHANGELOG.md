@@ -6,6 +6,13 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Tool calls have a time limit, so a tool that hangs no longer holds an agent until the request gives up.
+  - **The limit:** each call may take `TOOL_TIMEOUT` seconds (90), or per tool `tools.register(..., timeout=)` / `metadata={"llm_kit_timeout": s}`.
+  - **Past it:** the call ends as an error result (`status="error"`) that tells the model the tool didn't finish and its result is unknown, and the run goes on. LangChain's callbacks record the call as failed.
+  - **How a call ends:** async tools are cancelled. Sync tools run on a pool of `TOOL_THREADS` threads and are abandoned at the limit; their database connections are checked before and after each call. Inside a database transaction a sync tool still runs where it was called.
+- The request's deadline leaves time to answer. `AGENT_ANSWER_RESERVE` (25 s) of `AGENT_TIMEOUT` is kept back.
+  - **Tool calls:** each one gets at most the time left less the reserve.
+  - **Near the end:** the model is offered no tools and is told to answer now with what it has, saying what it couldn't check. Tools can read `agents.time_left(config)`.
 - Background runs keep their events, so a watcher can start from any point. Every event has `seq` (1, 2, 3, … with no gaps: the SSE `id:`, `"seq"` over WebSocket), and `watch(run, after=n)`, `?after=n`, a `Last-Event-ID` header or WebSocket `"after"` replay what came after `n`, then go on live. The starter, a late watcher and a reconnecting client miss nothing, and a watcher whose queue overflowed fills the gap from the log. If events asked for are gone, a `snapshot` with `"resync": true` comes first.
   - The log is kept in the Django cache when it is shared, otherwise in memory (`RUN_EVENT_LOG`, `RUN_EVENT_LOG_CACHE`). It is capped at `RUN_EVENT_LOG_SIZE` (2,000) events per run and dropped after `RUN_EVENT_LOG_TTL` (300 s). Tokens are written in batches every 100 ms.
   - The new system check `llm_kit.W003` warns about a worker executor with a log in memory.
@@ -59,6 +66,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- Tool errors shown to the model: a `ToolException`'s message (how a tool reports a failure) and invalid arguments are shown as before. For any other exception only its class name is shown, unless `EXPOSE_ERRORS`; the text used to include the exception's message.
+- Sync tools in an agent run now run on llm-kit's tool threads (outside a database transaction), so they can be stopped at their time limit. ContextVars carry over; `threading.local` values don't.
 - Starting a background run over SSE or WebSocket streams it from its first event (`thread`, `run`, then the run's events with `seq`), instead of `run` then a `snapshot`. Watching a run (`watch/`, WebSocket `watch` without `after`) still begins with a `snapshot`.
 - A touchpoint's model is no longer changed by llm-kit. The touchpoint's metadata, tags and recording handler used to be set on the object the backend factory returned. A factory that returns one shared model (and llm-kit's own cached LiteLLM routers) gained another handler on every build, so calls were recorded more and more times. `model()` now returns the factory's model wrapped in a `TouchpointModel` (a `RunnableBinding`: the model is `.bound`, its attributes are forwarded, and `bind_tools`/`with_structured_output` keep the config). Code that checked `isinstance(tp.model(), SomeChatModel)` should check `.bound`.
 - `defer_tools` defaults to `None` (defer when there are more than `DEFER_TOOLS_ABOVE` tools) instead of `False`. Pass `defer_tools=False` to keep every tool bound.

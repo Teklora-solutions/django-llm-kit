@@ -41,6 +41,20 @@ class DjangoAgentEnv(AgentEnv):
         name = (getattr(user, "get_full_name", lambda: "")() or "").strip() or user.get_username()
         return {"user": name, "tenant": "" if caller.tenant is None else str(caller.tenant)}
 
+    def in_transaction(self) -> bool:
+        from django.db import connections
+
+        return any(c.in_atomic_block for c in connections.all(initialized_only=True))
+
+    def run_tool_thread(self, call):
+        from django.db import close_old_connections
+
+        close_old_connections()  # as a request would: drop broken or expired connections
+        try:
+            return call()
+        finally:
+            close_old_connections()
+
     def override(self, name: str) -> AgentOverride | None:
         from llm_kit.agents.overrides import override_for
 

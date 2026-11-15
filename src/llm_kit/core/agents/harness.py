@@ -31,6 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel
 
+from llm_kit.core.agents import toolcalls
 from llm_kit.core.agents.deferral import (
     FIND_TOOLS,
     find_tools_tool,
@@ -43,6 +44,8 @@ from llm_kit.core.agents.deferral import (
     union,
 )
 from llm_kit.core.agents.delegate import (
+    CANCEL_TASK,
+    CHECK_TASK,
     DELEGATE,
     Refused,
     arun_subagent,
@@ -129,6 +132,7 @@ class Step:
     llm: Any = None
     deferred: list[BaseTool] = field(default_factory=list)  # with defer_tools: not loaded yet
     background: tuple[str, ...] = ()  # subagents it may start in the background this step
+    hurry: bool = False  # too little time left for a tool: answer now, with no tools offered
 
     @property
     def bound(self) -> list[BaseTool]:
@@ -170,6 +174,7 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         deferred = [t for t in tools if t.name not in loaded]
     subagents = available(spec, config, env)
     last = model_steps(state.get("messages") or []) + 1 >= spec.max_steps
+    hurry = bool(tools or subagents) and toolcalls.out_of_time(config)
     step = Step(
         spec=spec,
         tools=tools,
@@ -178,6 +183,7 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         last=last,
         deferred=deferred,
         background=background_names(spec, subagents, config, env),
+        hurry=hurry,
     )
     guidance = env.guidance(step.bound)
     if deferred:
@@ -191,6 +197,7 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         guidance=guidance,
         subagents=subagents,
         last_step=last and bool(tools or subagents),
+        hurry=hurry,
     )
     if with_model:
         from llm_kit.core.errors import BudgetExceeded
@@ -202,12 +209,25 @@ def prepare(declared: AgentSpec, state, config, env: AgentEnv, *, with_model: bo
         offered = step.bound + ([find_tools_tool()] if deferred else [])
         offered += [delegate_tool(spec, subagents, env, background=step.background)] if subagents else []
         offered += task_tools(env) if step.background else []
+        if hurry:  # no time to run one: the model answers with what it has
+            offered = []
         step.llm = llm.bind_tools(offered) if offered else llm
     return step
 
 
 def _after_reply(step: Step, reply: BaseMessage) -> dict:
     update: dict[str, Any] = {"messages": [reply], "stopped": ""}
+    if isinstance(reply, AIMessage) and reply.tool_calls and step.hurry and not step.last:
+        from llm_kit.core.serialize import message_text
+
+        said = message_text(reply).strip()
+        note = "(Stopped: this request ran out of time before finishing.)"
+        update["messages"] += [
+            *_not_run(reply, "there was no time left."),
+            _synthetic(f"{said}\n\n{note}" if said else note),
+        ]
+        update["stopped"] = "timeout"
+        return update
     if isinstance(reply, AIMessage) and reply.tool_calls and step.last:
         from llm_kit.core.serialize import message_text
 
@@ -261,13 +281,45 @@ def _as_tool_message(result: Any, call, limit: int | None = None) -> ToolMessage
 
 
 def _failed(call, exc: Exception) -> ToolMessage:
-    logger.warning("Tool %s failed: %s", call["name"], exc, exc_info=True)
+    """Any exception from a tool, as an error result the model reads; the run goes on.
+
+    A ``ToolException`` is how a tool reports a failure: its message is shown, as are invalid
+    arguments (the model's own input, which it needs to correct its call). For anything else
+    only the exception's class, unless ``EXPOSE_ERRORS``."""
+    from langchain_core.tools import ToolException
+    from pydantic import ValidationError
+
+    from llm_kit.core import config as settings
+
+    if isinstance(exc, ValidationError):
+        text = str(exc)
+    elif isinstance(exc, ToolException):
+        logger.info("Tool %s reported a failure: %s", call["name"], exc)
+        text = str(exc) or "it failed"
+    else:
+        logger.warning("Tool %s failed: %s", call["name"], exc, exc_info=True)
+        text = f"{type(exc).__name__}: {exc}" if settings.get("EXPOSE_ERRORS") else type(exc).__name__
     return ToolMessage(
-        content=f"Error: {call['name']} failed ({type(exc).__name__}: {exc}).",
+        content=f"Error: {call['name']} failed: {text}",
         tool_call_id=call["id"],
         name=call["name"],
         status="error",
     )
+
+
+_UNLIMITED = frozenset({DELEGATE, CHECK_TASK, CANCEL_TASK})  # a subagent keeps its own time
+
+
+def _limited(tool: BaseTool, call, config, env) -> BaseTool | ToolMessage:
+    """``tool`` under the time this call may take, or the reason it can't start."""
+    seconds = toolcalls.seconds_for(tool, config, own=tool.name not in _UNLIMITED)
+    if seconds == 0:
+        return ToolMessage(
+            content=toolcalls.no_time(call["name"]), tool_call_id=call["id"], name=call["name"], status="error"
+        )
+    if seconds is None or tool.name in _UNLIMITED:
+        return tool
+    return toolcalls.TimeLimited.around(tool, seconds, env)
 
 
 def _find(call, step: Step) -> tuple[ToolMessage, list[str]]:
@@ -348,7 +400,8 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
         step = prepare(spec, state, config, get_env(), with_model=False)
         if isinstance(step, dict):
             return {**step, "messages": [*_not_run(last, "the agent stopped."), *step["messages"]]}
-        available_tools = _tool_set(step, state, get_env())
+        env = get_env()
+        available_tools = _tool_set(step, state, env)
         out, loaded = [], []
         for call in calls:
             if call["name"] == FIND_TOOLS and step.deferred:
@@ -359,6 +412,10 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
             tool = available_tools.get(call["name"])
             if tool is None:
                 out.append(_refusal(call, step))
+                continue
+            tool = _limited(tool, call, config, env)
+            if isinstance(tool, ToolMessage):
+                out.append(tool)
                 continue
             try:
                 result = tool.invoke({**call, "type": "tool_call"}, config)
@@ -386,6 +443,9 @@ def _build_model(spec: AgentSpec, get_env) -> StateGraph:
             tool = available_tools.get(call["name"])
             if tool is None:
                 return _refusal(call, step)
+            tool = _limited(tool, call, config, env)
+            if isinstance(tool, ToolMessage):
+                return tool
             try:
                 result = await tool.ainvoke({**call, "type": "tool_call"}, config)
                 return _as_tool_message(result, call, step.spec.tool_result_chars)

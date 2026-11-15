@@ -37,6 +37,7 @@ from llm_kit import tools
 tools.expose(User, fields=["username", "first_name"], owner_field="pk", name="account", plural="accounts")
 tools.register(my_langchain_tool, permission="crm.view_lead", category="crm")   # hand-written tools join the catalogue
 tools.register(site_search, permission=tools.PUBLIC, category="site")            # anyone: visitors, and runs with no user
+tools.register(read_page, permission=tools.AUTHENTICATED, timeout=30)            # each call may take 30 s (default TOOL_TIMEOUT)
 ```
 
 ## Using the tools
