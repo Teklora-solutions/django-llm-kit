@@ -49,6 +49,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- A touchpoint's model is no longer changed by llm-kit. The touchpoint's metadata, tags and recording handler used to be set on the object the backend factory returned. A factory that returns one shared model (and llm-kit's own cached LiteLLM routers) gained another handler on every build, so calls were recorded more and more times. `model()` now returns the factory's model wrapped in a `TouchpointModel` (a `RunnableBinding`: the model is `.bound`, its attributes are forwarded, and `bind_tools`/`with_structured_output` keep the config). Code that checked `isinstance(tp.model(), SomeChatModel)` should check `.bound`.
 - `defer_tools` defaults to `None` (defer when there are more than `DEFER_TOOLS_ABOVE` tools) instead of `False`. Pass `defer_tools=False` to keep every tool bound.
 
 ### Fixed

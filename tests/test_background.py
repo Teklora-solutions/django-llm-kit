@@ -60,6 +60,18 @@ def test_a_run_finishes_after_the_starter_has_moved_on(user):
     assert state.values["messages"][-1].content == "echo: hi"
 
 
+async def _saved_input(thread, timeout=5):
+    from llm_kit.runtime.graphs import get_graph
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        state = await get_graph(thread.graph).aget_state(thread.config)
+        if state.values.get("messages"):
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError("the run's input was never saved")
+
+
 async def _collect(run, until_terminal=True):
     events = []
     async for event in background.watch(run):
@@ -71,6 +83,7 @@ async def test_watchers_get_a_snapshot_then_live_events(user, gate):
     thread = await Thread.objects.acreate(graph="gated", user=user)
     run = await background.astart(thread, {"message": "hey"}, user=user)
     await sync_to_async(wait_for)(run, "running")
+    await _saved_input(thread)  # "running" is set just before the first checkpoint is written
 
     first, second = asyncio.create_task(_collect(run)), asyncio.create_task(_collect(run))
     await asyncio.sleep(0.2)  # both subscribed
