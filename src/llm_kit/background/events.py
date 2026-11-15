@@ -65,13 +65,13 @@ def _checked(event: Any) -> dict[str, Any]:
 
 async def apublish(target: Any, event: dict[str, Any]) -> bool:
     """Send ``event`` to the watchers of ``target``'s background run; ``False`` if there's none."""
-    from llm_kit.background.bus import get_bus
+    from llm_kit.background.log import send
 
     event = _checked(event)
     run_id = run_id_of(target)
     if run_id is None:
         return False
-    await get_bus().publish(run_id, event)
+    await send(run_id, event)
     return True
 
 

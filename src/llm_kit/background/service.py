@@ -248,8 +248,7 @@ async def _execute_in_own_context(run_id: str) -> None:
 
 
 async def aexecute(run_id: str) -> None:
-    from llm_kit.background import executors
-    from llm_kit.background.bus import get_bus
+    from llm_kit.background import log
 
     now = timezone.now()
     claimed = await BackgroundRun.objects.filter(pk=run_id, status="queued").aupdate(
@@ -258,8 +257,17 @@ async def aexecute(run_id: str) -> None:
     if not claimed:  # already taken, finished or cancelled (a task delivered twice)
         return
     run = await BackgroundRun.objects.select_related("thread", "user").aget(pk=run_id)
-    bus = get_bus()
-    await bus.publish(run.run_id, _status_event(run))
+    log.open_writer(run.run_id)  # this process numbers and keeps the run's events
+    try:
+        await _run_claimed(run)
+    finally:
+        await log.close_writer(run.run_id)
+
+
+async def _run_claimed(run: BackgroundRun) -> None:
+    from llm_kit.background import executors, log
+
+    await log.send(run.run_id, _status_event(run))
     task = asyncio.current_task()
     executors.register_local(run.run_id, asyncio.get_running_loop(), task)
     watchdog = asyncio.create_task(_watchdog(run.run_id, task))
@@ -291,18 +299,18 @@ async def aexecute(run_id: str) -> None:
                 status = "interrupted" if result.get("interrupts") else "done"
             elif event["event"] == "error":
                 status, error = "error", str(event["data"].get("message", ""))[:500]
-            await bus.publish(run.run_id, event)
+            await log.send(run.run_id, event)
     except asyncio.CancelledError:
         status = "cancelled"
         if task is not None:
             task.uncancel()
     except runs.RunRefused as exc:  # a run hook said no: its message is for people
         status, error = "error", str(exc)[:500]
-        await bus.publish(run.run_id, {"event": "error", "data": {"message": error}})
+        await log.send(run.run_id, {"event": "error", "data": {"message": error}})
     except Exception as exc:
         logger.exception("llm_kit background run %s failed", run.run_id)
         status, error = "error", runs.error_message(exc)[:500]
-        await bus.publish(run.run_id, {"event": "error", "data": {"message": error}})
+        await log.send(run.run_id, {"event": "error", "data": {"message": error}})
     finally:
         watchdog.cancel()
         executors.unregister_local(run.run_id)
@@ -316,7 +324,7 @@ async def aexecute(run_id: str) -> None:
     )
     await Thread.objects.filter(pk=run.thread_id).aupdate(updated_at=timezone.now())
     run = await BackgroundRun.objects.aget(pk=run.pk)
-    await bus.publish(run.run_id, _status_event(run))
+    await log.send(run.run_id, _status_event(run))
     if ended:
         await sync_to_async(_finished)(run)
     else:
@@ -410,7 +418,7 @@ def runs_for(who):
 # ------------------------------------------------------------------ watching
 
 
-async def _snapshot(run: BackgroundRun) -> dict:
+async def _snapshot(run: BackgroundRun, seq: int | None = None, resync: bool = False) -> dict:
     state = None
     try:
         from llm_kit.runtime.graphs import get_graph
@@ -423,31 +431,96 @@ async def _snapshot(run: BackgroundRun) -> dict:
         r.to_json()
         async for r in BackgroundRun.objects.filter(thread_id=run.thread_id, status=WAITING).order_by("created_at")
     ]
-    return {"event": "snapshot", "data": {"run": run.to_json(), "state": state, "queue": queue}}
+    data = {"run": run.to_json(), "state": state, "queue": queue}
+    if seq is not None:
+        data["seq"] = seq  # the events after it follow
+    if resync:
+        data["resync"] = True
+    return {"event": "snapshot", "data": data}
 
 
-async def watch(run: BackgroundRun) -> AsyncIterator[dict]:
-    """Where ``run`` is (a ``snapshot``: the run and its thread's saved state), then its
-    events as they happen, ending with a ``status`` event once it has finished.
+async def watch(run: BackgroundRun, after: int | None = None) -> AsyncIterator[dict]:
+    """``run``'s events, ending with a ``status`` event once it has finished.
 
-    Nothing is replayed: a token streamed before you started watching is in the snapshot
-    only once its message is complete. Check access first (``get_run``)."""
+    ``after=None``: a ``snapshot`` first (the run, its thread's saved state, the queue, and
+    ``seq``: the last event it covers), then the events after it. ``after=n``: the events after
+    ``seq`` ``n`` from the run's event log, then live ones; ``after=0`` is every event from the
+    first. With ``after``, a ``snapshot`` (``"resync": true``) comes only when events it asked
+    for are no longer kept: it replaces what the watcher has, and the events after it follow.
+
+    Each event has ``seq`` (no gaps) unless ``RUN_EVENT_LOG`` is ``"off"``. Check access first
+    (``get_run``)."""
     from llm_kit.background.bus import get_bus
+    from llm_kit.background.log import get_log
 
-    async with get_bus().subscribe(run.run_id) as queue:
-        run = await sync_to_async(refresh)(run)  # subscribed first: nothing falls in between
-        yield await _snapshot(run)
-        if not run.active:
-            return
+    log = get_log()
+    run_id = run.run_id
+    async with get_bus().subscribe(run_id) as queue:  # subscribed first: nothing falls in between
+        run = await sync_to_async(refresh)(run)
+        last = 0
+        if after is None or log is None:
+            last = await log.ahead(run_id) if log is not None else 0
+            yield await _snapshot(run, last if log is not None else None)
+            if not run.active:
+                return
+        else:
+            last = max(0, int(after))
+            backlog, complete = await log.aread(run_id, last)
+            if not complete:  # what was asked for is gone: start again from a snapshot
+                last = await log.ahead(run_id)
+                yield await _snapshot(run, last, resync=True)
+            for event in backlog:
+                yield event
+                last = event["seq"]
+                if _is_final(event):
+                    return
+            if not run.active:
+                yield _status_event(run)  # its final status was never kept (or sent elsewhere)
+                return
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=WATCH_CHECK)
             except TimeoutError:
                 run = await sync_to_async(refresh)(run)
                 if not run.active:  # its last events went elsewhere, or it was lost
+                    if log is not None:
+                        for kept in (await log.aread(run_id, last))[0]:
+                            yield kept
+                            if _is_final(kept):
+                                return
                     yield _status_event(run)
                     return
                 continue
+            seq = event.get("seq")
+            if seq is not None and log is not None:
+                if seq <= last:
+                    continue  # already given (from the log)
+                if seq > last + 1:  # missed some (a full queue): fill in from the log
+                    missing = await _fill(log, run_id, last, seq)
+                    if missing is None:
+                        yield await _snapshot(await sync_to_async(refresh)(run), seq - 1, resync=True)
+                    else:
+                        for kept in missing:
+                            yield kept
+                last = seq
             yield event
-            if event.get("event") == "status" and event["data"].get("status") in FINISHED:
+            if _is_final(event):
                 return
+
+
+def _is_final(event: dict) -> bool:
+    return event.get("event") == "status" and event["data"].get("status") in FINISHED
+
+
+async def _fill(log, run_id: str, last: int, upto: int) -> list[dict] | None:
+    """The events between ``last`` and ``upto`` from the log, waiting for a batch being written."""
+    from llm_kit.background.log import FILL_TRIES, FLUSH_EVERY
+
+    for attempt in range(FILL_TRIES):
+        events, complete = await log.aread(run_id, last)
+        events = [e for e in events if e["seq"] < upto]
+        if complete and events and events[-1]["seq"] == upto - 1:
+            return events
+        await asyncio.sleep(FLUSH_EVERY * (attempt + 1))
+    logger.warning("Background run %s: events %s-%s are no longer kept", run_id, last + 1, upto - 1)
+    return None

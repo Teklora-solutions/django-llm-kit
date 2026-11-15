@@ -58,7 +58,7 @@ async for event in agents.stream(...):          # token / message / update / end
     ...
 
 run = agents.start("crm.researcher", "Audit last month's invoices", user=request.user)
-async for event in agents.watch(run):           # a snapshot, then live events
+async for event in agents.watch(run):           # a snapshot, then live events (after=n: from seq n)
     ...
 ```
 
