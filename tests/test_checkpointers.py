@@ -233,3 +233,37 @@ def test_in_memory_sqlite_test_database_is_flagged(settings):
         assert sqlite_test_database_is_shared() == []  # another checkpointer: not DjangoSaver's problem
     finally:
         connections.settings["default"] = original
+
+
+@pytest.mark.skipif(not os.environ.get("LLM_KIT_TEST_PG"), reason="needs LLM_KIT_TEST_PG")
+@pytest.mark.django_db(transaction=True)
+def test_postgres_setup_from_many_loops_and_processes_at_once_does_not_race():
+    """LangGraph's setup() reads the highest applied migration, then inserts the missing ones:
+    run twice at once on a fresh database, both insert version 1 and one fails."""
+    import threading
+
+    import psycopg
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    from llm_kit.persistence import postgres
+
+    info = postgres.conninfo()
+    with psycopg.connect(info, autocommit=True) as conn:
+        conn.execute("DROP TABLE IF EXISTS checkpoint_migrations")  # as on a fresh database
+    errors, start = [], threading.Barrier(6)
+
+    def set_up():
+        start.wait()
+        try:
+            postgres._ready.discard(info)  # each thread as a process of its own
+            postgres.ensure_tables(info)
+        except Exception as e:  # pragma: no cover - the bug
+            errors.append(e)
+
+    threads = [threading.Thread(target=set_up) for _ in range(6)]
+    [t.start() for t in threads]
+    [t.join(30) for t in threads]
+    assert errors == []
+    with psycopg.connect(info, autocommit=True) as conn:
+        (count,) = conn.execute("SELECT count(*) FROM checkpoint_migrations").fetchone()
+    assert count == len(PostgresSaver.MIGRATIONS)
