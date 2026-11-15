@@ -9,7 +9,7 @@ Every graph and agent uses one checkpointer, set by `LLM_KIT["CHECKPOINTER"]`:
 | Value | Meaning |
 |---|---|
 | `None` (default) | `DjangoSaver`: llm-kit's tables, on any database Django supports (SQLite, Postgres, MySQL) |
-| `"postgres"` | LangGraph's own `PostgresSaver`/`AsyncPostgresSaver`, on Django's Postgres database (`[postgres]` extra). Tables are created on first use |
+| `"postgres"` | LangGraph's own `PostgresSaver`/`AsyncPostgresSaver`, on Django's Postgres database (`[postgres]` extra). Tables are created on first use, once per process, under an advisory lock so processes starting together don't race |
 | `"myapp.ai:saver"` | a saver instance, a saver class, or a zero-argument factory |
 | `{"sync": "myapp.ai:saver", "async": "myapp.ai:asaver"}` | separate factories for sync and async code; the async one may be a coroutine |
 

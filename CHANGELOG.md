@@ -65,6 +65,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Fixed
 
+- The Postgres checkpointer no longer races to create its tables. LangGraph's `setup()` reads the highest applied migration, then inserts the missing ones. On a fresh database, or after an upgrade that adds a migration, two event loops or processes starting together inserted the same version, and a run failed with `UniqueViolation` on `checkpoint_migrations_pkey`. Setup now runs once per process and database, under a Postgres advisory lock.
 - Minimum versions that actually work: `langgraph-checkpoint>=4.3.0` (`DjangoSaver` needs `writes_sort_key`; with 4.1 Django failed at start-up), `langchain-core>=1.2.5` (what `langgraph-checkpoint` 4.3 needs, though it declares less) and `langgraph>=1.1.5` (earlier 1.x break with the `langgraph-prebuilt` they allow). CI now also runs on the lowest allowed versions (#35).
 - The SSE views read each event in a new task, so a ContextVar set during a run didn't reliably reach its later steps. They now read the whole run in one task.
 - Budget totals started at $0 recorded spend for up to 30 s on a freshly booted host (monotonic time under the refresh interval made a never-read total look fresh).

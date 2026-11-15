@@ -6,18 +6,51 @@
 
 which means ``{"sync": sync_saver, "async": async_saver}``: a pooled ``PostgresSaver`` for sync
 code, and an ``AsyncPostgresSaver`` with its own pool for each event loop. Tables are created
-on first use (``setup()``). Pass your own factories for other databases, pool sizes or options::
+on first use: LangGraph's ``setup()``, once per process and database, under a Postgres advisory
+lock, so processes and event loops starting together don't race to apply the same migration.
+Pass your own factories for other databases, pool sizes or options::
 
     LLM_KIT = {"CHECKPOINTER": {"sync": "myapp.ai:saver", "async": "myapp.ai:asaver"}}
 """
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 SAVERS = {"sync": "llm_kit.persistence.postgres:sync_saver", "async": "llm_kit.persistence.postgres:async_saver"}
 
 _CONNECTION = {"autocommit": True, "prepare_threshold": 0}
+
+# Session advisory lock held around LangGraph's setup(), which reads the highest applied
+# migration and then inserts the missing ones: two at once insert the same version and one
+# fails. A session lock (not a transaction one): some migrations use CREATE INDEX CONCURRENTLY,
+# which can't run in a transaction.
+SETUP_LOCK = 0x6C6C6D5F6B6974  # "llm_kit"-ish; any bigint shared by every process
+
+_ready: set[str] = set()  # databases whose tables this process has set up
+_ready_lock = threading.Lock()
+
+
+def ensure_tables(info: str) -> None:
+    """Create or migrate LangGraph's checkpoint tables in the database at ``info``: once per
+    process, and one process at a time."""
+    if info in _ready:
+        return
+    with _ready_lock:
+        if info in _ready:
+            return
+        import psycopg
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+
+        with psycopg.connect(info, **_CONNECTION, row_factory=dict_row) as conn:
+            conn.execute("SELECT pg_advisory_lock(%s)", (SETUP_LOCK,))
+            try:
+                PostgresSaver(conn).setup()
+            finally:
+                conn.execute("SELECT pg_advisory_unlock(%s)", (SETUP_LOCK,))
+        _ready.add(info)
 
 
 def conninfo(alias: str = "default") -> str:
@@ -46,28 +79,30 @@ def sync_saver(alias: str = "default", max_size: int = 10):
     from psycopg.rows import dict_row
     from psycopg_pool import ConnectionPool
 
-    pool = ConnectionPool(
-        conninfo(alias), kwargs={**_CONNECTION, "row_factory": dict_row}, max_size=max_size, open=True
-    )
+    info = conninfo(alias)
+    ensure_tables(info)
+    pool = ConnectionPool(info, kwargs={**_CONNECTION, "row_factory": dict_row}, max_size=max_size, open=True)
     saver = PostgresSaver(pool)
-    saver.setup()
     saver.llm_kit_close = pool.close  # CheckpointRouter.close()
     return saver
 
 
 async def async_saver(alias: str = "default", max_size: int = 10):
+    import asyncio
+
     from asgiref.sync import sync_to_async
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
     from psycopg.rows import dict_row
 
     info = await sync_to_async(conninfo)(alias)
+    if info not in _ready:
+        await asyncio.to_thread(ensure_tables, info)  # plain psycopg: no Django thread needed
     # One pool per event loop, and loops can be short-lived (asyncio.run in a task): start small.
     pool = _loop_pool_class()(
         info, kwargs={**_CONNECTION, "row_factory": dict_row}, min_size=1, max_size=max_size, open=False
     )
     await pool.open()
     saver = AsyncPostgresSaver(pool)
-    await saver.setup()
     saver.llm_kit_close = lambda: _finish(pool)
     return saver
 
