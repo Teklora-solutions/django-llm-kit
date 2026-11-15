@@ -128,6 +128,8 @@ Set `LLM_KIT["MODEL_BACKEND"]`, or `touchpoint(..., backend=…)` for one touchp
 | `"langchain"` | `init_chat_model` with the provider's `langchain-*` package |
 | `"myapp.ai:build"` | your own `fn(ref, params, api_keys) -> BaseChatModel` |
 
+Your factory may build a model once and return the same object every time, for example to keep its HTTP client. llm-kit never changes the model it gets. The touchpoint's metadata, tags and recording handler are added as call config: `model()` returns the factory's model wrapped in a `TouchpointModel` (a `RunnableBinding`; the model is `.bound`, attributes are forwarded). `bind_tools` and `with_structured_output` keep that config, and a call is recorded once even if you also pass llm-kit's handler yourself.
+
 ## Embeddings
 
 A touchpoint can embed as well as chat. Embedding calls go through the same resolution, admin overrides, API keys, fallbacks, retry waits and circuit breaker, and are recorded as calls with `kind="embedding"`:

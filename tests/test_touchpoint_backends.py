@@ -55,10 +55,10 @@ def test_litellm_single_key_and_params():
         retry="never",
     )
     llm = t.model(env=FakeEnv(keys={"anthropic": ["sk-1"]}))
-    assert isinstance(llm, ChatLiteLLM)
+    assert isinstance(llm.bound, ChatLiteLLM)
     assert llm.model == "anthropic/claude-sonnet-5-5" and llm.api_key == "sk-1" and llm.temperature == 0
     assert llm.model_kwargs["custom_option"] == 5  # not a ChatLiteLLM field -> passed through
-    assert llm.metadata["llm_kit_touchpoint"] == "t.ll"
+    assert llm.config["metadata"]["llm_kit_touchpoint"] == "t.ll"
 
 
 @needs_litellm
@@ -67,10 +67,12 @@ def test_litellm_key_pool_uses_a_router():
 
     t = touchpoint("t.pool", default="anthropic/claude-sonnet-5-5", backend="litellm", retry="never")
     llm = t.model(env=FakeEnv(keys={"anthropic": ["sk-1", "sk-2", "sk-3"]}))
-    assert isinstance(llm, ChatLiteLLMRouter)
+    assert isinstance(llm.bound, ChatLiteLLMRouter)
     assert [d["litellm_params"]["api_key"] for d in llm.router.model_list] == ["sk-1", "sk-2", "sk-3"]
     # Built once per (model, keys): the Router (with its state) is reused across calls.
-    assert t.model(env=FakeEnv(keys={"anthropic": ["sk-1", "sk-2", "sk-3"]})).router is llm.router
+    again = t.model(env=FakeEnv(keys={"anthropic": ["sk-1", "sk-2", "sk-3"]}))
+    assert again.router is llm.router
+    assert again.bound.callbacks == llm.bound.callbacks  # the shared router isn't changed per build
 
 
 @needs_litellm

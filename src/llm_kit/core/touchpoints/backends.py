@@ -26,7 +26,7 @@ from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import Runnable, RunnableConfig, RunnableWithFallbacks
+from langchain_core.runnables import Runnable, RunnableBinding, RunnableConfig, RunnableWithFallbacks
 from langchain_core.runnables.config import (
     ensure_config,
     get_async_callback_manager_for_config,
@@ -59,6 +59,43 @@ LANGCHAIN_PROVIDERS = {
     "azure": "azure_openai",
     "huggingface": "huggingface",
 }
+
+
+class TouchpointModel(RunnableBinding):
+    """A factory's chat model with the touchpoint's metadata, tags and recording handler added as
+    call config. The model itself is never changed, so a factory may build a model once and
+    return it for every call (keeping its HTTP client).
+
+    ``bind_tools`` and ``with_structured_output`` keep that config (a plain ``RunnableBinding``
+    would drop it), and a callback passed twice (the binding's and the caller's) runs once."""
+
+    def bind_tools(self, tools: Sequence[Any], **kwargs: Any) -> TouchpointModel:
+        return self._rebind(self.bound.bind_tools(tools, **kwargs))
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> TouchpointModel:
+        return self._rebind(self.bound.with_structured_output(schema, **kwargs))
+
+    def _rebind(self, runnable: Runnable) -> TouchpointModel:
+        return TouchpointModel(bound=runnable, config=self.config, kwargs={})
+
+    def _merge_configs(self, *configs: RunnableConfig | None) -> RunnableConfig:
+        config = super()._merge_configs(*configs)
+        callbacks = config.get("callbacks")
+        if isinstance(callbacks, list):
+            unique: list[Any] = []
+            for cb in callbacks:
+                if not any(cb is seen for seen in unique):
+                    unique.append(cb)
+            config["callbacks"] = unique
+        return config
+
+
+def wrap(model: Runnable, metadata: dict[str, Any], tags: Sequence[str], callbacks: Sequence[Any]) -> TouchpointModel:
+    """``model`` with call config added, leaving the model itself as it is."""
+    config: dict[str, Any] = {"metadata": dict(metadata), "tags": list(tags)}
+    if callbacks:
+        config["callbacks"] = list(callbacks)
+    return TouchpointModel(bound=model, config=config, kwargs={})
 
 
 class TouchpointChatModel(RunnableWithFallbacks):
@@ -455,18 +492,15 @@ def build_for(tp, resolution: Resolution, env: ResolutionEnv, retry: RetryPolicy
     models, refs, owners = [], [], []
     for index, ref in enumerate(resolution.candidates):
         for owner, keys in key_sets(env, ref, tp):  # one attempt per owner (BYOK: theirs, then yours)
-            model = factory(ref, dict(resolution.params), keys)
-            model.metadata = {
-                **(model.metadata or {}),
-                **metadata,
-                "llm_kit_candidate": index,
-                "llm_kit_model": ref,
-                "llm_kit_key_owner": owner,
-            }
-            model.tags = [*(model.tags or []), f"llm_kit:{tp.name}"]
-            if handler is not None:
-                existing = model.callbacks if isinstance(model.callbacks, list) else []
-                model.callbacks = [*existing, handler]
+            built = factory(ref, dict(resolution.params), keys)
+            # Added as call config, never set on the factory's model: a factory may return one
+            # shared model for every call (its client lives there), and must find it unchanged.
+            model = wrap(
+                built,
+                {**metadata, "llm_kit_candidate": index, "llm_kit_model": ref, "llm_kit_key_owner": owner},
+                [f"llm_kit:{tp.name}"],
+                [handler] if handler is not None else [],
+            )
             models.append(model)
             refs.append(ref)
             owners.append(owner)

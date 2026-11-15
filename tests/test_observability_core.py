@@ -340,3 +340,67 @@ def test_otel_spans_follow_genai_conventions():
     assert ok.attributes["gen_ai.request.model"] == "gemini-3.8-flash"
     assert ok.attributes["gen_ai.usage.input_tokens"] == 1000 and ok.attributes["llm_kit.cost_usd"] > 0
     assert ok.end_time >= ok.start_time  # latency is whole milliseconds; fakes answer in <1 ms
+
+
+# ----------------------------------------------------------- factories that reuse their models
+
+SHARED: dict = {}
+
+
+class SharedModel(UsageModel):
+    def bind_tools(self, tools, **kwargs):
+        return self.bind(tools=[t.name for t in tools], **kwargs)
+
+
+def shared_backend(ref, params, keys):
+    """A factory that builds each model once and returns it every time (keeping its client)."""
+    if ref not in SHARED:
+        SHARED[ref] = SharedModel(messages=iter([]))
+        SHARED[ref].callbacks = []  # its own list, which must stay as it is
+    model = SHARED[ref]
+    model.messages = iter(
+        [AIMessage(content="hi", usage_metadata={"input_tokens": 3, "output_tokens": 2, "total_tokens": 5})]
+    )
+    return model
+
+
+def test_a_factory_reusing_its_model_has_each_call_recorded_once(sink):
+    SHARED.clear()
+    t = touchpoint(
+        "t.shared", default="anthropic/claude-sonnet-5-5", backend="tests.test_observability_core:shared_backend"
+    )
+    env = FakeEnv(keys={"anthropic": ["k"]})
+    for _ in range(3):
+        t.model(env=env, retry="never").invoke("hello")
+    model = SHARED["anthropic/claude-sonnet-5-5"]
+    assert model.callbacks == [] and not (model.metadata or {}).get("llm_kit_touchpoint") and not model.tags
+    assert len(done(sink).calls) == 3  # once each, not 1 + 2 + 3
+
+
+def test_a_callback_the_caller_also_passes_runs_once(sink):
+    from llm_kit.core.observability.handler import get_handler
+
+    SHARED.clear()
+    t = touchpoint(
+        "t.shared", default="anthropic/claude-sonnet-5-5", backend="tests.test_observability_core:shared_backend"
+    )
+    t.model(env=FakeEnv(keys={"anthropic": ["k"]}), retry="never").invoke("hello", {"callbacks": [get_handler()]})
+    assert len(done(sink).calls) == 1
+
+
+def test_structured_output_and_tools_keep_the_touchpoints_config(sink):
+    from langchain_core.tools import tool
+
+    @tool
+    def double(x: int) -> int:
+        """Double x."""
+        return 2 * x
+
+    SHARED.clear()
+    t = touchpoint(
+        "t.shared", default="anthropic/claude-sonnet-5-5", backend="tests.test_observability_core:shared_backend"
+    )
+    llm = t.model(env=FakeEnv(keys={"anthropic": ["k"]}), retry="never").bind_tools([double])
+    llm.invoke("hello")
+    (call,) = done(sink).calls
+    assert call.touchpoint == "t.shared"

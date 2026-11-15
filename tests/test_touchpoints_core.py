@@ -207,11 +207,13 @@ def test_problems_report():
 # ------------------------------------------------------------------ models
 
 
-def test_model_single_candidate_is_plain_chat_model_with_metadata():
+def test_model_single_candidate_is_the_factorys_model_with_call_config():
     llm = tp(params={"temperature": 0}).model(env=FakeEnv(), max_tokens=7, retry="never")
-    assert isinstance(llm, Echo)
-    assert llm.metadata["llm_kit_touchpoint"] == "t.chat" and llm.metadata["llm_kit_chosen_by"] == "code"
-    assert "llm_kit:t.chat" in llm.tags
+    assert isinstance(llm.bound, Echo)
+    meta = llm.config["metadata"]
+    assert meta["llm_kit_touchpoint"] == "t.chat" and meta["llm_kit_chosen_by"] == "code"
+    assert "llm_kit:t.chat" in llm.config["tags"]
+    assert not (llm.bound.metadata or {}).get("llm_kit_touchpoint")  # the model itself is untouched
     assert BUILT == [("anthropic/claude-sonnet-5-5", {"temperature": 0, "max_tokens": 7}, ["a"])]
 
 
@@ -231,7 +233,8 @@ def test_bind_tools_keeps_fallbacks():
 
     llm = tp(fallbacks=["gemini/gemini-3.8-flash"]).model(env=FakeEnv()).bind_tools([double])
     assert isinstance(llm, TouchpointChatModel) and len(llm.models) == 2
-    assert all(m.kwargs["tools"] == ["double"] for m in llm.models)
+    assert all(m.bound.kwargs["tools"] == ["double"] for m in llm.models)
+    assert all(m.config["metadata"]["llm_kit_touchpoint"] == "t.chat" for m in llm.models)  # config kept
 
 
 class Lead(BaseModel):
