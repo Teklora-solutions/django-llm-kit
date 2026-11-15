@@ -10,7 +10,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Name | What it is |
 |---|---|
-| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint` |
+| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None, adapt_input=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint`. `adapt_input(input, ref, info)` gives [each model input it can read](../guides/touchpoints.md#input-for-each-model) |
 | `RetryPolicy(attempts=0, max_wait=0.0)`, `RetryPolicy.BATCH`, `.INTERACTIVE`, `.NEVER` | how long a call waits out a [short rate limit](../guides/touchpoints.md#rate-limits-and-fallbacks) before falling back |
 | `AllModelsFailed` | raised when every model of a touchpoint failed; `errors` is `[(model, exception), …]` |
 | `get_touchpoint(name)` | a declared touchpoint |
@@ -23,7 +23,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Method | Returns |
 |---|---|
-| `model(requested=None, *, config=None, retry=None, fallbacks=True, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call; `fallbacks=False` uses only the resolved model |
+| `model(requested=None, *, config=None, retry=None, fallbacks=True, adapt_input=None, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call; `fallbacks=False` uses only the resolved model; `adapt_input=False` turns the touchpoint's adapter off. The model your factory built is the result's `.bound` (it is never changed) |
 | `complete(prompt, *, schema=None, requested=None, config=None, retry=None, fallbacks=True, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
 
@@ -35,7 +35,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 ## `llm_kit.background`
 
-`start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `execute(run_id)` (for your own executor), `RunBusy`, and the signal `run_finished` (`run`, `status`, `result`, `error`; [sent once](../guides/streaming.md#when-a-run-finishes)). See [Background runs](../guides/streaming.md#background-runs).
+`start(thread, payload, owner=None, *, user=None, tenant=None, queue=None) -> BackgroundRun`, `astart(...)`, `advance(thread)` (start the next waiting run), `waiting_runs(thread)`, `watch(run)` (async iterator: `snapshot`, live events, final `status`), `cancel(run)`, `get_run(run_id, who)` (raises `BackgroundRun.DoesNotExist` or `access.NotAllowed`), `runs_for(who)`, `refresh(run)`, `active_run(thread)` (the thread's queued or running run, or `None`), `publish(target, event)` / `apublish(...)` and `run_id_of(target)` ([your own events](../guides/streaming.md#background-runs) to watchers), `execute(run_id)` (for your own executor), `RunBusy`, and the signal `run_finished` (`run`, `status`, `result`, `error`; [sent once](../guides/streaming.md#when-a-run-finishes)). See [Background runs](../guides/streaming.md#background-runs).
 
 ## `llm_kit.core.hooks`
 
