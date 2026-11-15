@@ -6,6 +6,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- `background.active_run(thread)` is now exported from `llm_kit.background`: the thread's queued or running background run, or `None`.
+
 - `touchpoint(..., adapt_input=fn)` and `model(adapt_input=)`: `fn(input, ref, info)` is called for each model just before it is tried, fallbacks included, so each gets input it can read (audio or a transcript; a file reference only the provider that holds it can open). It works for invoke, ainvoke, stream and astream, after `bind_tools` and `with_structured_output`, and before the rate-limit slot. It may be async. A model it raises for is skipped.
 
 - Per-model rate limits: requests per minute, tokens per minute and requests per day for each model, from `RATE_LIMITS` or `RateLimit` rows (patterns like `gemini/*`; set by people, never synced). Counts are shared across processes in Django's cache: with Redis, one atomic script with a sliding window. A slot is taken before every chat and embedding call. At a limit the call waits up to the retry policy's `max_wait`, then moves to the next fallback, then raises `RateLimited` (classified `rate_limit` or `quota_exhausted`). Tokens are counted after each call, and refused requests take no slot. Calls on brought keys aren't counted. `GET llm/api/monitoring/rate-limits/` shows use against limits (migration 0020).

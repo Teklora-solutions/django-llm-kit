@@ -144,7 +144,9 @@ def test_one_run_at_a_time_per_thread(user, settings):
     with pytest.raises(background.RunBusy) as e:
         background.start(thread, {"message": "y"}, user=user)
     assert e.value.run == first
+    assert background.active_run(thread) == first
     first.cancel()
+    assert background.active_run(thread) is None
     background.start(thread, {"message": "y"}, user=user)  # free again
 
 
