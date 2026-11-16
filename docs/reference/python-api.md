@@ -29,11 +29,13 @@ The names below are the supported public API. Anything else, in particular `llm_
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
 | `image(prompt, *, n=None, size=None, quality=None, style=None, fetch=True, **params)`, `aimage(...)`, `edit_image(prompt, images, *, mask=None, n=None, size=None, quality=None, fetch=True, **params)`, `aedit_image(...)` | [images](../guides/media.md#images) as a `MediaResult`; also take `requested`, `config`, `retry`, `fallbacks` and `caller` |
 | `speak(text, *, voice=None, format=None, speed=None, instructions=None, **params)`, `aspeak(...)`, `transcribe(audio, *, language=None, prompt=None, format=None, timestamps=None, temperature=None, **params)`, `atranscribe(...)` | [speech](../guides/media.md#speech) and [transcripts](../guides/media.md#transcription) as a `MediaResult` |
+| `video(prompt, *, image=None, seconds=None, size=None, resolution=None, wait=None, **params)`, `avideo(...)` | a [video](../guides/media.md#video), waiting for it |
+| `start_video(prompt, *, image=None, seconds=None, size=None, resolution=None, owner=None, user=None, tenant=None, requested=None, wait=None, **params)`, `start(kind, *, owner=None, user=None, tenant=None, requested=None, wait=None, params=None, **request)`, `astart_video(...)`, `astart(...)` | a [background media job](../guides/media.md#background-jobs): returns its `BackgroundRun` (`kind="media"`) at once |
 | `generate(kind, *, requested=None, config=None, retry=None, fallbacks=True, caller=None, wait=None, params=None, **request)`, `agenerate(...)` | [media](../guides/media.md) of `kind` (`"image"`, `"video"`, `"speech"`, a kind you registered...); returns a `MediaResult` |
 
 ## `llm_kit.media`
 
-`Media` (`Media.of(value)`, `read()`, `chunks()`, `save(storage=None, name=None)`, `to_json()`), `MediaResult`, `MediaKind`, `register_kind(kind)`, `get_kind(name)`, `all_kinds()`, `JobState` (`PENDING`, `RUNNING`, `DONE`, `FAILED`), `LiteLLMMedia`, `is_refusal(error)`, and the errors `ContentRefused`, `MediaJobFailed`, `MediaJobTimeout`, `NoMediaReturned`, `MediaTooLarge`, `UnsafeURL`. See [Generated media](../guides/media.md).
+`Media` (`Media.of(value)`, `read()`, `chunks()`, `save(storage=None, name=None)`, `to_json()`), `MediaResult`, `MediaKind`, `register_kind(kind)`, `get_kind(name)`, `all_kinds()`, `JobState` (`PENDING`, `RUNNING`, `DONE`, `FAILED`), `LiteLLMMedia`, `is_refusal(error)`, and the errors `ContentRefused`, `MediaJobFailed`, `MediaJobTimeout`, `NoMediaReturned`, `MediaTooLarge`, `UnsafeURL`. `llm_kit.media.signals.media_job_finished` (`run`, `status`, `result`, `error`): sent once when a [background media job](../guides/media.md#background-jobs) ends. `llm_kit.media.webhooks.receive` is the [webhook](../guides/media.md#webhooks) view. See [Generated media](../guides/media.md).
 
 ## `llm_kit.agents`
 

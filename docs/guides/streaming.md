@@ -106,6 +106,8 @@ Close codes: 4401 not signed in, 4403 not your thread, 4404 no such thread.
 
 A background run belongs to its thread, not to the request that started it. Closing the tab, a dropped connection or a deploy of the web tier (with a worker executor) doesn't stop it. Anyone who may use the thread can watch it or cancel it.
 
+[Background media jobs](media.md#background-jobs), such as a video, are background runs too, with `kind="media"` and no thread. They are watched, listed and cancelled the same way, by whoever started them. Their `to_json()` has `"kind"`.
+
 Start one with `"background": true` in any run payload (SSE, REST, WebSocket), or from code:
 
 ```python

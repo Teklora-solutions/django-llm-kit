@@ -53,3 +53,34 @@ def worker_events_are_kept_where_watchers_read(app_configs=None, **kwargs):
             id="llm_kit.W003",
         )
     ]
+
+
+@checks.register("llm_kit")
+def media_webhooks_can_arrive(app_configs=None, **kwargs):
+    """Webhooks for media jobs need a secret (or your own check) and, where the job tells the
+    provider where to call, the URL to give it."""
+    from llm_kit import conf
+    from llm_kit.media.webhooks import config_for
+
+    messages = []
+    for provider in conf.get("MEDIA_WEBHOOKS") or {}:
+        config = config_for(provider) or {}
+        how = config.get("verify") or "standard"
+        if how in ("standard", "hmac") and not config.get("secret"):
+            messages.append(
+                checks.Error(
+                    f"MEDIA_WEBHOOKS[{provider!r}] checks signatures with a secret but has none.",
+                    hint="Add the signing secret the provider gave you, or set verify to your own function.",
+                    id="llm_kit.E003",
+                )
+            )
+        if config.get("param") and not conf.get("MEDIA_WEBHOOK_URL"):
+            messages.append(
+                checks.Warning(
+                    f"MEDIA_WEBHOOKS[{provider!r}] gives jobs a webhook URL, but MEDIA_WEBHOOK_URL is not set: "
+                    "its jobs fall back to checking every MEDIA_WEBHOOK_POLL_EVERY seconds.",
+                    hint='Set MEDIA_WEBHOOK_URL = "https://<your site>/llm/media/webhooks/{provider}/".',
+                    id="llm_kit.W004",
+                )
+            )
+    return messages

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from collections.abc import AsyncIterator
 from datetime import timedelta
 from typing import Any
@@ -18,7 +19,7 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from llm_kit.models import BackgroundRun, Thread
-from llm_kit.models.runs import ACTIVE, FINISHED, WAITING
+from llm_kit.models.runs import ACTIVE, FINISHED, MEDIA, WAITING
 from llm_kit.runtime import access, runs
 
 logger = logging.getLogger("llm_kit")
@@ -201,6 +202,8 @@ def _finished(run: BackgroundRun) -> None:
     """After this process moved ``run`` to a final status (only the one whose change took
     effect calls this): ``run_finished``, and the next waiting run on its thread may start."""
     transaction.on_commit(lambda: _announce(run.pk))
+    if run.thread_id is None:  # a media job: no queue to move
+        return
     try:
         advance(run.thread_id)
     except Exception:
@@ -211,11 +214,18 @@ def _announce(run_pk) -> None:
     from llm_kit.background.signals import run_finished
 
     run = BackgroundRun.objects.select_related("thread").get(pk=run_pk)
-    for receiver, response in run_finished.send_robust(
-        sender=BackgroundRun, run=run, status=run.status, result=run.result, error=run.error
-    ):
-        if isinstance(response, Exception):
-            logger.error("run_finished receiver %r failed for run %s", receiver, run.run_id, exc_info=response)
+    signals = [("run_finished", run_finished)]
+    if run.kind == MEDIA:
+        from llm_kit.media.signals import media_job_finished
+
+        signals.append(("media_job_finished", media_job_finished))
+    for name, signal in signals:
+        result = run.result if run.status == "done" or name == "run_finished" else None
+        for receiver, response in signal.send_robust(
+            sender=BackgroundRun, run=run, status=run.status, result=result, error=run.error
+        ):
+            if isinstance(response, Exception):
+                logger.error("%s receiver %r failed for run %s", name, receiver, run.run_id, exc_info=response)
 
 
 async def astart(thread: Thread, payload: dict[str, Any], owner: Any = None, **kw) -> BackgroundRun:
@@ -275,31 +285,10 @@ async def _run_claimed(run: BackgroundRun) -> None:
     try:
         if run.cancel_requested:
             raise asyncio.CancelledError
-        from llm_kit.runtime.graphs import get_graph
-
-        owner = access.Owner(user=run.user, tenant=run.tenant or None)
-        config = await sync_to_async(runs.build_config)(run.thread, run.payload, owner=owner)
-        config["run_id"] = run.id  # the recorded LLMRun has the same id
-        config["configurable"][RUN_KEY] = run.run_id
-        meta = config.setdefault("metadata", {})
-        if "llm_kit_agent" in meta:
-            meta["llm_kit_agent_run"] = run.run_id
-        if run.agents:
-            from llm_kit.background.subagents import inherit_limits
-
-            inherit_limits(run, config)
-        graph = get_graph(run.graph)
-        # The run hooks run here, in the process that runs it, from the saved payload and owner.
-        setup = await sync_to_async(runs.prepare)(
-            run.thread, run.payload, owner=owner, background=True, config=config, context=run.context
-        )
-        async for event in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
-            if event["event"] == "end":
-                result = event["data"]
-                status = "interrupted" if result.get("interrupts") else "done"
-            elif event["event"] == "error":
-                status, error = "error", str(event["data"].get("message", ""))[:500]
-            await log.send(run.run_id, event)
+        if run.kind == MEDIA:
+            status, result, error = await _run_media(run)
+        else:
+            status, result, error = await _run_graph(run)
     except asyncio.CancelledError:
         status = "cancelled"
         if task is not None:
@@ -317,12 +306,15 @@ async def _run_claimed(run: BackgroundRun) -> None:
         from llm_kit.background.events import flush
 
         await flush(run.run_id)  # your own events go out before the final status
+    if status == "cancelled" and run.kind == MEDIA:  # what it got to (the provider's job id)
+        result = await BackgroundRun.objects.filter(pk=run.pk).values_list("result", flat=True).afirst()
     # Only if still running: a run marked lost meanwhile (heartbeats delayed) stays lost, and was
     # announced as lost already.
     ended = await BackgroundRun.objects.filter(pk=run.pk, status="running").aupdate(
         status=status, ended_at=timezone.now(), result=result, error=error
     )
-    await Thread.objects.filter(pk=run.thread_id).aupdate(updated_at=timezone.now())
+    if run.thread_id is not None:
+        await Thread.objects.filter(pk=run.thread_id).aupdate(updated_at=timezone.now())
     run = await BackgroundRun.objects.aget(pk=run.pk)
     await log.send(run.run_id, _status_event(run))
     if ended:
@@ -331,17 +323,68 @@ async def _run_claimed(run: BackgroundRun) -> None:
         logger.warning("Background run %s finished %s after it was marked %s", run.run_id, status, run.status)
 
 
+async def _run_media(run: BackgroundRun) -> tuple[str, Any, str]:
+    from llm_kit.background import log
+    from llm_kit.core.media.errors import MediaJobTimeout
+    from llm_kit.media import jobs
+
+    try:
+        return "done", await jobs.run(run), ""
+    except MediaJobTimeout as exc:  # it may still finish at the provider: keep its id
+        error = str(exc)[:500]
+        await log.send(run.run_id, {"event": "error", "data": {"message": error}})
+        return "error", {"job": {"id": exc.job_id, "model": exc.model}}, error
+
+
+async def _run_graph(run: BackgroundRun) -> tuple[str, Any, str]:
+    from llm_kit.background import log
+
+    status, result, error = "done", None, ""
+    from llm_kit.runtime.graphs import get_graph
+
+    owner = access.Owner(user=run.user, tenant=run.tenant or None)
+    config = await sync_to_async(runs.build_config)(run.thread, run.payload, owner=owner)
+    config["run_id"] = run.id  # the recorded LLMRun has the same id
+    config["configurable"][RUN_KEY] = run.run_id
+    meta = config.setdefault("metadata", {})
+    if "llm_kit_agent" in meta:
+        meta["llm_kit_agent_run"] = run.run_id
+    if run.agents:
+        from llm_kit.background.subagents import inherit_limits
+
+        inherit_limits(run, config)
+    graph = get_graph(run.graph)
+    # The run hooks run here, in the process that runs it, from the saved payload and owner.
+    setup = await sync_to_async(runs.prepare)(
+        run.thread, run.payload, owner=owner, background=True, config=config, context=run.context
+    )
+    async for event in runs.astream_run(graph, setup.input, setup.config, setup.contexts):
+        if event["event"] == "end":
+            result = event["data"]
+            status = "interrupted" if result.get("interrupts") else "done"
+        elif event["event"] == "error":
+            status, error = "error", str(event["data"].get("message", ""))[:500]
+        await log.send(run.run_id, event)
+    return status, result, error
+
+
 async def _watchdog(run_id: str, task: asyncio.Task | None) -> None:
     """Heartbeats, and a cancel asked for from another process."""
     beat = 0.0
+    notified = None
     while True:
         await asyncio.sleep(POLL)
         beat += POLL
-        wanted = await BackgroundRun.objects.filter(pk=run_id).values_list("cancel_requested", flat=True).afirst()
-        if wanted is None or wanted:
+        row = await BackgroundRun.objects.filter(pk=run_id).values_list("cancel_requested", "notified_at").afirst()
+        if row is None or row[0]:
             if task is not None:
                 task.cancel()
             return
+        if row[1] is not None and row[1] != notified:  # a webhook: the media job checks now
+            notified = row[1]
+            from llm_kit.media.jobs import wake_local
+
+            wake_local(run_id)
         if beat >= HEARTBEAT:
             beat = 0.0
             await BackgroundRun.objects.filter(pk=run_id).aupdate(heartbeat_at=timezone.now())
@@ -406,19 +449,64 @@ def get_run(run_id, who) -> BackgroundRun:
 
     Raises ``BackgroundRun.DoesNotExist`` or ``access.NotAllowed``."""
     run = BackgroundRun.objects.select_related("thread").get(pk=run_id)
-    access.check_thread(run.thread, who)
+    check_run(run, who)
     return refresh(run)
 
 
+def check_run(run: BackgroundRun, who) -> None:
+    """Raise ``access.NotAllowed`` unless the requester may use ``run``: its thread's rules, or for
+    a media job (no thread) the same rules applied to who started it."""
+    from llm_kit import conf
+
+    if run.thread_id is not None:
+        access.check_thread(run.thread, who)
+        return
+    owner = who if isinstance(who, access.Owner) else access.owner_for(who)
+    if not access.can_use_api(owner):
+        raise access.NotAllowed("Authentication required.")
+    if run.tenant and owner.tenant_id and run.tenant != owner.tenant_id:
+        raise access.NotAllowed("Not your run.")
+    if run.user_id is not None:
+        if owner.is_authenticated and run.user_id == owner.user.pk:
+            return
+        raise access.NotAllowed("Not your run.")
+    if owner.is_staff:
+        return
+    if run.session_key and not conf.get("REQUIRE_AUTH") and not owner.is_authenticated:
+        if owner.visitor_id and secrets.compare_digest(run.session_key, owner.visitor_id):
+            return
+    raise access.NotAllowed("Not your run.")
+
+
 def runs_for(who):
-    """Background runs on the threads the requester may list, newest first."""
-    return BackgroundRun.objects.filter(thread__in=access.threads_for(who))
+    """Background runs the requester may list (on their threads, and their media jobs), newest first."""
+    from django.db.models import Q
+
+    from llm_kit import conf
+
+    owner = who if isinstance(who, access.Owner) else access.owner_for(who)
+    mine = Q(thread__in=access.threads_for(owner))
+    if owner.is_authenticated:
+        jobs = Q(kind=MEDIA, user=owner.user)
+        if owner.tenant_id:
+            jobs &= Q(tenant=owner.tenant_id) | Q(tenant="")
+        mine |= jobs
+    elif not conf.get("REQUIRE_AUTH") and owner.visitor_id:
+        mine |= Q(kind=MEDIA, user__isnull=True, session_key=owner.visitor_id)
+    return BackgroundRun.objects.filter(mine)
 
 
 # ------------------------------------------------------------------ watching
 
 
 async def _snapshot(run: BackgroundRun, seq: int | None = None, resync: bool = False) -> dict:
+    if run.thread_id is None:  # a media job: its result so far is the whole state
+        data = {"run": run.to_json(), "state": None, "queue": []}
+        if seq is not None:
+            data["seq"] = seq
+        if resync:
+            data["resync"] = True
+        return {"event": "snapshot", "data": data}
     state = None
     try:
         from llm_kit.runtime.graphs import get_graph

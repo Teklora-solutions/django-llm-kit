@@ -150,6 +150,14 @@ DEFAULTS: dict[str, Any] = {
     "MEDIA_MAX_BYTES": 1 << 30,
     "MEDIA_FETCH_TIMEOUT": 120,
     "MEDIA_FETCH_PRIVATE": False,
+    # Background media jobs (tp.start_video(), tp.start()): how long one may wait for its provider,
+    # providers whose webhooks are on ({"replicate": {"secret": "whsec_..."}}; see
+    # llm_kit.media.webhooks), the URL they call ("https://.../llm/media/webhooks/{provider}/"),
+    # and how often a job checks anyway while it waits for a webhook.
+    "MEDIA_BACKGROUND_WAIT": 3600,
+    "MEDIA_WEBHOOKS": {},
+    "MEDIA_WEBHOOK_URL": "",
+    "MEDIA_WEBHOOK_POLL_EVERY": 60,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

@@ -13,15 +13,23 @@ FINISHED = ("interrupted", "done", "error", "cancelled", "lost")
 STATUS = [(s, s) for s in (WAITING, *ACTIVE, *FINISHED)]
 
 
-class BackgroundRun(models.Model):
-    """One run of a thread's graph that keeps going without the request that started it.
+GRAPH, MEDIA = "graph", "media"
+KINDS = [(GRAPH, "graph"), (MEDIA, "media")]
 
-    Its ``id`` is also the recorded ``LLMRun.run_id``. At most one is queued or running per thread;
-    others may be ``waiting`` behind it, and start in order."""
+
+class BackgroundRun(models.Model):
+    """One run that keeps going without the request that started it: a run of a thread's graph
+    (``kind="graph"``), or a media job such as a video (``kind="media"``, no thread).
+
+    Its ``id`` is also the recorded ``LLMRun.run_id`` (a media job's calls have it as ``run_id``).
+    At most one is queued or running per thread; others may be ``waiting`` behind it."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    thread = models.ForeignKey("llm_kit.Thread", on_delete=models.CASCADE, related_name="background_runs")
-    graph = models.CharField(max_length=100)
+    kind = models.CharField(max_length=10, choices=KINDS, default=GRAPH, db_index=True)
+    thread = models.ForeignKey(
+        "llm_kit.Thread", null=True, blank=True, on_delete=models.CASCADE, related_name="background_runs"
+    )
+    graph = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=12, choices=STATUS, default="queued", db_index=True)
     # waiting: submitted to the executor once the thread is free; queued/running: submitted.
     payload = models.JSONField(default=dict, blank=True, help_text="The run payload (message, input, resume...).")
@@ -39,6 +47,8 @@ class BackgroundRun(models.Model):
     ended_at = models.DateTimeField(null=True, blank=True)
     heartbeat_at = models.DateTimeField(null=True, blank=True)
     cancel_requested = models.BooleanField(default=False)
+    # A media job's provider said it changed (a webhook): check it now instead of at the next poll.
+    notified_at = models.DateTimeField(null=True, blank=True)
     error = models.CharField(max_length=500, blank=True)
     result = models.JSONField(null=True, blank=True, help_text="The end event's data: next, interrupts.")
     # A subagent started in the background (delegate(..., background=true)): where its answer goes,
@@ -65,7 +75,8 @@ class BackgroundRun(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"{self.graph} {self.status} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
+        what = self.graph if self.kind == GRAPH else f"media {(self.payload or {}).get('kind', '')}"
+        return f"{what} {self.status} @ {self.created_at:%Y-%m-%d %H:%M:%S}"
 
     @property
     def run_id(self) -> str:
@@ -85,6 +96,7 @@ class BackgroundRun(models.Model):
     def to_json(self) -> dict:
         return {
             "id": self.run_id,
+            "kind": self.kind,
             "thread": self.thread_id and str(self.thread_id),
             "graph": self.graph,
             "status": self.status,

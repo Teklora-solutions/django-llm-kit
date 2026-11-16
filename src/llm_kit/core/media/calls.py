@@ -125,14 +125,43 @@ def _make_sync(call: _Call, ref: str, backend: Any, request: dict, extra: dict, 
     return backend.generate(call.kind.name, request, **extra)
 
 
+class JobWatcher:
+    """Hooks into a long job run asynchronously (a background media job uses them): when it is
+    submitted, each state it reports, and the wait between checks. Override what you need."""
+
+    async def submitted(self, ref: str, job_id: str, backend: Any) -> None:
+        """The provider took the job."""
+
+    async def progress(self, ref: str, job_id: str, state: mb.JobState) -> None:
+        """A check found it ``state``."""
+
+    async def pause(self, ref: str, seconds: float) -> None:
+        """Wait before the next check (return early to check sooner, after a webhook)."""
+        await asyncio.sleep(seconds)
+
+    def extra_params(self, ref: str) -> dict[str, Any]:
+        """More provider parameters for the submission (a webhook URL)."""
+        return {}
+
+
 async def _make_async(
-    call: _Call, ref: str, backend: Any, request: dict, extra: dict, wait: float | None
+    call: _Call,
+    ref: str,
+    backend: Any,
+    request: dict,
+    extra: dict,
+    wait: float | None,
+    watcher: JobWatcher | None = None,
 ) -> MediaResult:
     if call.kind.long and mb.supports_jobs(backend):
+        watcher = watcher or JobWatcher()
+        extra = {**extra, **watcher.extra_params(ref)}
         job_id = await mb.asubmit(backend, call.kind.name, request, **extra)
+        await watcher.submitted(ref, job_id, backend)
         deadline, every = time.monotonic() + _wait_for(wait), _poll_every()
         while True:
             state = await mb.apoll(backend, call.kind.name, job_id)
+            await watcher.progress(ref, job_id, state)
             if state.status == mb.DONE and state.result is not None:
                 state.result.job_id = job_id
                 return state.result
@@ -140,7 +169,7 @@ async def _make_async(
                 raise _job_failed(ref, job_id, state)
             if time.monotonic() + every > deadline:
                 raise MediaJobTimeout(f"{ref} job {job_id} did not finish in time.", job_id, ref)
-            await asyncio.sleep(every)
+            await watcher.pause(ref, every)
     return await mb.agenerate(backend, call.kind.name, request, **extra)
 
 
@@ -198,7 +227,11 @@ def run_sync(call: _Call, request: dict[str, Any], extra: dict[str, Any], wait: 
 
 
 async def run_async(
-    call: _Call, request: dict[str, Any], extra: dict[str, Any], wait: float | None = None
+    call: _Call,
+    request: dict[str, Any],
+    extra: dict[str, Any],
+    wait: float | None = None,
+    watcher: JobWatcher | None = None,
 ) -> MediaResult:
     from llm_kit.core.touchpoints import backends
     from llm_kit.core.touchpoints.embeddings import _aslot, _failure
@@ -212,7 +245,7 @@ async def run_async(
                 break
             rec, t0 = _start(call, ref, index, request)
             try:
-                result = _usable(ref, await _make_async(call, ref, backend, request, extra, wait))
+                result = _usable(ref, await _make_async(call, ref, backend, request, extra, wait, watcher))
                 await _aprice(call, ref, request, result)
             except Exception as e:
                 _end(call, rec, t0, request, ref, error=e)
@@ -288,7 +321,7 @@ def _start(call: _Call, ref: str, index: int, request: dict[str, Any]):
     meta.update((call.run or {}).get("metadata") or {})
     rec = CallRecord(
         call_id=str(uuid.uuid4()),
-        run_id=_root_run(parent),
+        run_id=_root_run(parent) or meta.get("llm_kit_media_job"),
         started_at=datetime.now(UTC),
         kind=call.kind.name,
         key_owner=call.owners[index] if call.owners else "platform",

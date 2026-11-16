@@ -5,8 +5,8 @@ from llm_kit.models import BackgroundRun
 
 @admin.register(BackgroundRun)
 class BackgroundRunAdmin(admin.ModelAdmin):
-    list_display = ("id", "graph", "status", "user", "tenant", "executor", "created_at", "ended_at")
-    list_filter = ("status", "graph", "executor")
+    list_display = ("id", "kind", "graph", "status", "user", "tenant", "executor", "created_at", "ended_at")
+    list_filter = ("kind", "status", "graph", "executor")
     search_fields = ("id", "thread__id", "user__username", "tenant")
     raw_id_fields = ("thread", "user")
     readonly_fields = [f.name for f in BackgroundRun._meta.fields]

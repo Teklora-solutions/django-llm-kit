@@ -137,6 +137,57 @@ class LiteLLMMedia:
     async def agenerate(self, kind: str, request: dict[str, Any], **params: Any) -> MediaResult:
         return await self._op(kind, "_a")(request, self._kwargs(params))
 
+    # long jobs: _submit_<kind>, _poll_<kind> and their async forms
+
+    def _key(self) -> dict[str, Any]:
+        return {"api_key": random.choice(self.keys)} if self.keys else {}
+
+    def submit(self, kind: str, request: dict[str, Any], **params: Any) -> str:
+        return self._op(kind, "_submit_")(request, self._kwargs(params))
+
+    async def asubmit(self, kind: str, request: dict[str, Any], **params: Any) -> str:
+        return await self._op(kind, "_asubmit_")(request, self._kwargs(params))
+
+    def poll(self, kind: str, job_id: str) -> JobState:
+        return self._op(kind, "_poll_")(job_id, self._key())
+
+    async def apoll(self, kind: str, job_id: str) -> JobState:
+        return await self._op(kind, "_apoll_")(job_id, self._key())
+
+    @staticmethod
+    def provider_job_id(job_id: str) -> str:
+        """The provider's own id for a job (LiteLLM's video ids carry the provider and model)."""
+        try:
+            decoded = _litellm().decode_video_id_with_provider(job_id)
+        except Exception:
+            return job_id
+        return str(get(decoded, "video_id") or job_id)
+
+    # video
+
+    def _submit_video(self, request, kwargs):
+        return str(get(_litellm().video_generation(**_video_args(self, request, kwargs)), "id"))
+
+    async def _asubmit_video(self, request, kwargs):
+        args = await asyncio.to_thread(_video_args, self, request, kwargs)  # reading the image may fetch it
+        return str(get(await _litellm().avideo_generation(**args), "id"))
+
+    def _poll_video(self, job_id, kwargs):
+        litellm = _litellm()
+        status = litellm.video_status(video_id=job_id, **kwargs)
+        state = video_state(status)
+        if state.status == DONE:
+            state.result = video_result(status, litellm.video_content(video_id=job_id, **kwargs))
+        return state
+
+    async def _apoll_video(self, job_id, kwargs):
+        litellm = _litellm()
+        status = await litellm.avideo_status(video_id=job_id, **kwargs)
+        state = video_state(status)
+        if state.status == DONE:
+            state.result = video_result(status, await litellm.avideo_content(video_id=job_id, **kwargs))
+        return state
+
     # images
 
     def _image(self, request, kwargs):
@@ -349,3 +400,48 @@ def _plain(value: Any) -> Any:
     if callable(dump):
         return _plain(dump())
     return value
+
+
+# ------------------------------------------------------------------ LiteLLM: video
+
+_VIDEO_STATUS = {"queued": PENDING, "pending": PENDING, "in_progress": RUNNING, "processing": RUNNING}
+
+
+def _video_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    args = {"model": self.ref, "prompt": request["prompt"], **kwargs}
+    if request.get("image") is not None:
+        args["input_reference"] = request["image"].upload()
+    if request.get("seconds") is not None:
+        args["seconds"] = str(request["seconds"])
+    if request.get("size") is not None:
+        args["size"] = request["size"]
+    return args
+
+
+def video_state(status: Any) -> JobState:
+    """A LiteLLM ``VideoObject`` as a ``JobState`` (without the result)."""
+    raw = str(get(status, "status") or "").lower()
+    progress = get(status, "progress")
+    if raw in ("completed", "succeeded", "success", "done"):
+        return JobState(DONE, progress=100)
+    if raw in ("failed", "error", "cancelled", "canceled", "expired"):
+        error = get(status, "error")
+        message = get(error, "message") if error is not None and not isinstance(error, str) else error
+        return JobState(FAILED, progress=progress, error=str(message or raw))
+    return JobState(_VIDEO_STATUS.get(raw, RUNNING), progress=progress)
+
+
+def video_result(status: Any, content: Any) -> MediaResult:
+    from llm_kit.core.media.types import Media, sniff
+
+    data = bytes(content or b"") if not hasattr(content, "content") else bytes(content.content)
+    info = {k: v for k in ("seconds", "size") if (v := get(status, k)) is not None}
+    if "seconds" in info:
+        try:
+            info["seconds"] = float(info["seconds"])
+        except (TypeError, ValueError):
+            info.pop("seconds")
+    media = Media(data=data, mime_type=sniff(data) or "video/mp4", meta=dict(info))
+    return MediaResult(
+        "video", media=[media], data=info, cost=reported_cost(status), served_model=str(get(status, "model") or "")
+    )
