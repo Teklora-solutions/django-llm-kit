@@ -27,6 +27,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 | `model(requested=None, *, config=None, retry=None, fallbacks=True, adapt_input=None, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call; `fallbacks=False` uses only the resolved model; `adapt_input=False` turns the touchpoint's adapter off. The model your factory built is the result's `.bound` (it is never changed) |
 | `complete(prompt, *, schema=None, requested=None, config=None, retry=None, fallbacks=True, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
+| `image(prompt, *, n=None, size=None, quality=None, style=None, fetch=True, **params)`, `aimage(...)`, `edit_image(prompt, images, *, mask=None, n=None, size=None, quality=None, fetch=True, **params)`, `aedit_image(...)` | [images](../guides/media.md#images) as a `MediaResult`; also take `requested`, `config`, `retry`, `fallbacks` and `caller` |
 | `generate(kind, *, requested=None, config=None, retry=None, fallbacks=True, caller=None, wait=None, params=None, **request)`, `agenerate(...)` | [media](../guides/media.md) of `kind` (`"image"`, `"video"`, `"speech"`, a kind you registered...); returns a `MediaResult` |
 
 ## `llm_kit.media`

@@ -81,6 +81,30 @@ song = jingles.generate("music", prompt="upbeat, 15 seconds", seconds=15)
 
 `long=True` makes it a [long job](#long-jobs). `measure(request, result)` returns what the call is billed by (see [Prices](#records-and-prices)). Units the backend sets on the result win.
 
+## Images
+
+```python
+covers = touchpoint(
+    "media.covers",
+    default="openai/gpt-image-1",
+    fallbacks=["gemini/imagen-4.0-generate-001", "fal_ai/fal-ai/flux-pro/v1.1"],
+    requires={"kind": "image"},
+    model_params={"gemini/*": {"aspect_ratio": "16:9"}, "openai/*": {"size": "1536x1024"}},
+)
+
+result = covers.image("A lighthouse at dawn, watercolour", n=2, quality="high")
+result.media                     # two Media, already downloaded
+result.revised_prompt            # when the model rewrote the prompt
+result.save(name="covers/lighthouse")
+
+edited = editor.edit_image("Make it night", result.first, mask=mask_png)
+```
+
+- **`image(prompt, *, n=None, size=None, quality=None, style=None, fetch=True, **params)`** and `aimage(...)`. `size`, `quality` and `style` go to models that take them. Other `params` (`aspect_ratio`, `output_format`, `background`, `seed`...) go to the provider as they are.
+- **`edit_image(prompt, images, *, mask=None, n=None, size=None, quality=None, fetch=True, **params)`** and `aedit_image(...)`. `images` is one image or a list (bytes, URLs, files, `Media`). Where `mask` is transparent, the image may change.
+- **Downloads:** images the provider returns as URLs are downloaded before the call returns, because those URLs often expire within the hour. `fetch=False` keeps the URLs instead.
+- **Prices:** `units` has `images`, `size` and `quality`, `input_images` for edits, and image tokens for models billed by tokens. LiteLLM's reported cost is used when it gives one.
+
 ## Settings for each model
 
 Providers don't agree on settings. OpenAI's `alloy` voice doesn't exist at ElevenLabs, and one image API takes `size="1024x1024"` where another takes `aspect_ratio="1:1"`. `model_params` gives each model its own, over the touchpoint's `params`:

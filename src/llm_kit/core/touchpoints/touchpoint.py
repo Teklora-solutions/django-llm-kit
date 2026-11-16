@@ -285,7 +285,7 @@ class Touchpoint:
 
     # ---------------------------------------------------------------- media
 
-    def _media(self, kind, requested, config, env, retry, fallbacks, caller):
+    def _media(self, kind, requested=None, config=None, env=None, retry=None, fallbacks=True, caller=None):
         from llm_kit.core.media import calls
         from llm_kit.core.media.kinds import get_kind
 
@@ -341,6 +341,116 @@ class Touchpoint:
         call = self._media(kind, requested, config, env, retry, fallbacks, caller)
         return await calls.run_async(call, request, dict(params or {}), wait)
 
+    def _run_media(self, kind: str, request: dict[str, Any], options: dict[str, Any], params: dict[str, Any]):
+        from llm_kit.core.media import calls
+
+        wait, fetch = options.pop("wait", None), options.pop("fetch", True)
+        call = self._media(kind, **options)
+        result = calls.run_sync(call, _drop_none(request), params, wait)
+        return calls.fetched(result) if fetch else result
+
+    async def _arun_media(self, kind: str, request: dict[str, Any], options: dict[str, Any], params: dict[str, Any]):
+        from llm_kit.core.media import calls
+
+        wait, fetch = options.pop("wait", None), options.pop("fetch", True)
+        call = self._media(kind, **options)
+        result = await calls.run_async(call, _drop_none(request), params, wait)
+        return await calls.afetched(result) if fetch else result
+
+    def image(
+        self,
+        prompt: str,
+        *,
+        n: int | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+        style: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        fetch: bool = True,
+        **params: Any,
+    ) -> Any:
+        """Make ``n`` images from ``prompt``; a ``MediaResult`` whose ``media`` are the images.
+
+        ``size`` (``"1024x1024"``), ``quality`` and ``style`` go to models that take them; other
+        ``params`` (``aspect_ratio``, ``output_format``, ``background``...) go to the provider as
+        they are. Images the provider returns as URLs are downloaded (``fetch=False``: keep the
+        URLs; they often expire within the hour). See the media guide."""
+        request = {"prompt": prompt, "n": n, "size": size, "quality": quality, "style": style}
+        options = _options(requested, config, env, retry, fallbacks, caller, fetch=fetch)
+        return self._run_media("image", request, options, params)
+
+    async def aimage(
+        self,
+        prompt: str,
+        *,
+        n: int | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+        style: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        fetch: bool = True,
+        **params: Any,
+    ) -> Any:
+        request = {"prompt": prompt, "n": n, "size": size, "quality": quality, "style": style}
+        options = _options(requested, config, env, retry, fallbacks, caller, fetch=fetch)
+        return await self._arun_media("image", request, options, params)
+
+    def edit_image(
+        self,
+        prompt: str,
+        images: Any,
+        *,
+        mask: Any = None,
+        n: int | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        fetch: bool = True,
+        **params: Any,
+    ) -> Any:
+        """Change ``images`` (one, or a list: bytes, paths, URLs, files or ``Media``) as ``prompt``
+        says; ``mask`` marks where (transparent pixels are changed). A ``MediaResult``."""
+        request = _edit_request(prompt, images, mask, n, size, quality)
+        options = _options(requested, config, env, retry, fallbacks, caller, fetch=fetch)
+        return self._run_media("image_edit", request, options, params)
+
+    async def aedit_image(
+        self,
+        prompt: str,
+        images: Any,
+        *,
+        mask: Any = None,
+        n: int | None = None,
+        size: str | None = None,
+        quality: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        fetch: bool = True,
+        **params: Any,
+    ) -> Any:
+        request = _edit_request(prompt, images, mask, n, size, quality)
+        options = _options(requested, config, env, retry, fallbacks, caller, fetch=fetch)
+        return await self._arun_media("image_edit", request, options, params)
+
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 
@@ -370,6 +480,43 @@ class Touchpoint:
         return {**(config or {}), "callbacks": [handler], "run_name": self.name}
 
     _run_config = run_config
+
+
+def _options(requested, config, env, retry, fallbacks, caller, **more) -> dict[str, Any]:
+    return {
+        "requested": requested,
+        "config": config,
+        "env": env,
+        "retry": retry,
+        "fallbacks": fallbacks,
+        "caller": caller,
+        **more,
+    }
+
+
+def _drop_none(request: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in request.items() if v is not None}
+
+
+def _media_list(value: Any) -> list:
+    from llm_kit.core.media.types import Media
+
+    if isinstance(value, (list, tuple)):
+        return [Media.of(v) for v in value]
+    return [Media.of(value)]
+
+
+def _edit_request(prompt, images, mask, n, size, quality) -> dict[str, Any]:
+    from llm_kit.core.media.types import Media
+
+    return {
+        "prompt": prompt,
+        "images": _media_list(images),
+        "mask": Media.of(mask) if mask is not None else None,
+        "n": n,
+        "size": size,
+        "quality": quality,
+    }
 
 
 CALLER_KEY = "__llm_kit_caller"  # same as llm_kit.tools.caller.CONFIG_KEY
