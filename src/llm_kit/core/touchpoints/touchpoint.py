@@ -451,6 +451,100 @@ class Touchpoint:
         options = _options(requested, config, env, retry, fallbacks, caller, fetch=fetch)
         return await self._arun_media("image_edit", request, options, params)
 
+    def speak(
+        self,
+        text: str,
+        *,
+        voice: Any = None,
+        format: str | None = None,
+        speed: float | None = None,
+        instructions: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        """Read ``text`` aloud: a ``MediaResult`` whose ``first`` is the audio.
+
+        ``voice`` is the provider's voice name or id (set it per model with ``model_params``: no
+        two providers share voices); ``format`` is ``mp3`` (usual default), ``wav``, ``opus``,
+        ``aac``, ``flac`` or ``pcm``; ``instructions`` steer the delivery on models that take them."""
+        request = {"text": text, "voice": voice, "format": format, "speed": speed, "instructions": instructions}
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return self._run_media("speech", request, options, params)
+
+    async def aspeak(
+        self,
+        text: str,
+        *,
+        voice: Any = None,
+        format: str | None = None,
+        speed: float | None = None,
+        instructions: str | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        request = {"text": text, "voice": voice, "format": format, "speed": speed, "instructions": instructions}
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return await self._arun_media("speech", request, options, params)
+
+    def transcribe(
+        self,
+        audio: Any,
+        *,
+        language: str | None = None,
+        prompt: str | None = None,
+        format: str | None = None,
+        timestamps: Any = None,
+        temperature: float | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        """Write down what is said in ``audio`` (bytes, a URL, a file or ``Media``): a
+        ``MediaResult`` whose ``text`` is the transcript, with ``language``, ``duration``,
+        ``segments`` and ``words`` when the provider gives them.
+
+        ``language`` (``"en"``) and ``prompt`` (names, spellings) help the model; ``format`` is
+        ``json``, ``text``, ``srt``, ``vtt`` or ``verbose_json``; ``timestamps=True`` (or
+        ``["word", "segment"]``) asks for timings."""
+        request = _transcription_request(audio, language, prompt, format, timestamps, temperature)
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return self._run_media("transcription", request, options, params)
+
+    async def atranscribe(
+        self,
+        audio: Any,
+        *,
+        language: str | None = None,
+        prompt: str | None = None,
+        format: str | None = None,
+        timestamps: Any = None,
+        temperature: float | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        request = _transcription_request(audio, language, prompt, format, timestamps, temperature)
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return await self._arun_media("transcription", request, options, params)
+
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 
@@ -516,6 +610,25 @@ def _edit_request(prompt, images, mask, n, size, quality) -> dict[str, Any]:
         "n": n,
         "size": size,
         "quality": quality,
+    }
+
+
+def _transcription_request(audio, language, prompt, format, timestamps, temperature) -> dict[str, Any]:
+    from llm_kit.core.media.types import Media, audio_seconds
+
+    media = Media.of(audio)
+    if timestamps is True:
+        timestamps = ["segment"]
+    elif isinstance(timestamps, str):
+        timestamps = [timestamps]
+    return {
+        "audio": media,
+        "language": language,
+        "prompt": prompt,
+        "format": format,
+        "timestamps": timestamps or None,
+        "temperature": temperature,
+        "duration": audio_seconds(media) if media.data is not None else None,
     }
 
 
