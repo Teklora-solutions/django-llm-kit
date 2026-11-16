@@ -10,7 +10,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
   - **Backends:** LiteLLM by default (`MEDIA_BACKEND`), or `touchpoint(..., media_backend=)` with your own `fn(ref, params, api_keys)`.
   - **Long jobs** (video) are submitted, then checked every `MEDIA_POLL_EVERY` seconds for at most `MEDIA_JOB_WAIT`. A job that runs out of time raises `MediaJobTimeout` with its id and is never sent to the next model.
   - **Refusals:** a provider's content-policy refusal raises `ContentRefused` and doesn't try the next model unless the touchpoint has `fallback_on_refusal=True`.
-  - **`Media`** takes bytes, paths, URLs, `data:` URIs and files, and streams into Django storage (`save()`, `MEDIA_STORAGE`, `MEDIA_PATH`). Fetching is limited to public http(s) URLs (`MEDIA_FETCH_PRIVATE`) and `MEDIA_MAX_BYTES`.
+  - **`Media`** takes bytes, paths, URLs, `data:` URIs and files, and streams into Django storage (`save()`, `MEDIA_STORAGE`, `MEDIA_PATH`). Fetching is limited to public http(s) URLs, checked as each connection opens (`MEDIA_FETCH_PRIVATE`), and to `MEDIA_MAX_BYTES`. A string is never read as a file path.
   - **Records and prices:** `LLMCall.units` records what a media call was billed by (images, seconds, characters...) (migration 0021). The cost is what the backend reported, else the units times the catalogue's per-unit prices.
 - `touchpoint(..., model_params={ref or pattern: params})`: parameters for one model only, over `params`, for chat, embeddings and media.
 - The catalogue keeps media models' prices by unit (`price_units`: per image, second, character, pixel, resolution...).

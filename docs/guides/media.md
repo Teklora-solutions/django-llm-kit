@@ -120,7 +120,7 @@ Some media takes minutes: you submit a job, check on it until it's done, then fe
 
 ## Media in and out
 
-`Media.of(value)` takes what you have: bytes, a path, an http(s) URL, a `data:` URI, an open file, a Django `File`, or `{"url": ...}` / `{"data": <base64>, "mime_type": ...}`. Results hold `Media` too.
+`Media.of(value)` takes what you have: bytes, an http(s) URL, a `data:` URI, an open file, a Django `File`, or `{"url": ...}` / `{"data": <base64>, "mime_type": ...}`. Results hold `Media` too. A string is never read as a file path, because it may have come from a user. For a file of your own, pass a `Path` or use `Media.from_path(path)`.
 
 | | |
 |---|---|
@@ -134,7 +134,7 @@ Some media takes minutes: you submit a job, check on it until it's done, then fe
 - A download is spooled to a temporary file past 8 MB, so a large video isn't held in memory.
 - Provider URLs often expire after an hour, so save what you want to keep.
 - Media larger than `MEDIA_MAX_BYTES` (1 GiB) raises `MediaTooLarge`.
-- The kit fetches public http(s) URLs only. A URL on a private address (your own network, the cloud's metadata service) raises `UnsafeURL`, unless `MEDIA_FETCH_PRIVATE` is on. URLs your users give are checked the same way.
+- The kit fetches public http(s) URLs only. A URL on a private address (your own network, the cloud's metadata service) raises `UnsafeURL`, unless `MEDIA_FETCH_PRIVATE` is on. The address is checked when each connection opens, redirects included, so a name that changes what it resolves to can't get past the check. URLs your users give are checked the same way.
 
 ## Records and prices
 

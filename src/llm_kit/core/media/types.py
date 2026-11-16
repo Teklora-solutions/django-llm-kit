@@ -41,21 +41,26 @@ def _max_bytes() -> int:
 
 
 def _check_url(url: str) -> None:
-    """Fetch only public http(s) URLs (``MEDIA_FETCH_PRIVATE`` allows the rest): a URL a user
-    gave must not reach the server's own network."""
+    """Fetch only http(s) URLs."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise UnsafeURL(f"Only http(s) URLs can be fetched, not {url[:80]!r}.")
-    if config.get("MEDIA_FETCH_PRIVATE"):
-        return
+
+
+def public_address(host: str, port: int) -> str:
+    """An address of ``host`` to connect to, refusing a host with any private address
+    (``MEDIA_FETCH_PRIVATE`` allows them): a URL a user gave must not reach the server's own
+    network. Called when connecting, so a name that resolves differently later can't slip by."""
     try:
-        infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
     except OSError as e:
-        raise UnsafeURL(f"Cannot resolve {parsed.hostname}: {e}") from e
-    for info in infos:
-        address = ipaddress.ip_address(info[4][0])
-        if not address.is_global:
-            raise UnsafeURL(f"{parsed.hostname} is a private address; the kit fetches public URLs only.")
+        raise UnsafeURL(f"Cannot resolve {host}: {e}") from e
+    addresses = [info[4][0] for info in infos]
+    if not config.get("MEDIA_FETCH_PRIVATE"):
+        for address in addresses:
+            if not ipaddress.ip_address(address.split("%")[0]).is_global:
+                raise UnsafeURL(f"{host} is a private address; the kit fetches public URLs only.")
+    return addresses[0]
 
 
 def _data_uri(value: str) -> tuple[bytes, str]:
@@ -137,9 +142,10 @@ class Media:
 
     @classmethod
     def of(cls, value: Any, mime_type: str = "", name: str = "") -> Media:
-        """``value`` as ``Media``: bytes, a path (``str`` or ``Path``), an http(s) URL, a
-        ``data:`` URI, an open binary file, a Django ``File``, ``{"url": ...}`` /
-        ``{"data": <base64>, "mime_type": ...}``, or ``Media``."""
+        """``value`` as ``Media``: bytes, an http(s) URL, a ``data:`` URI, an open binary file, a
+        Django ``File``, ``{"url": ...}`` / ``{"data": <base64>, "mime_type": ...}``, ``Media``,
+        or a file on disk as a ``Path``. A string is never read as a path (it may have come from a
+        user): use ``Path(...)`` or ``Media.from_path()`` for files of your own."""
         if isinstance(value, Media):
             return value
         if isinstance(value, (bytes, bytearray, memoryview)):
@@ -153,9 +159,13 @@ class Media:
                 return cls(data=data, mime_type=mime_type or mime, name=name)
             if value.startswith(("http://", "https://")):
                 return cls(url=value, mime_type=mime_type or _guess(urlparse(value).path), name=name)
-            return cls(path=value, mime_type=mime_type or _guess(value), name=name or os.path.basename(value))
+            raise UnsafeURL(
+                f"{value[:80]!r} is not an http(s) URL or a data: URI. For a file of your own, pass a Path."
+            )
         if isinstance(value, dict):
             if value.get("url"):
+                if not isinstance(value["url"], str):
+                    raise BadRequest("A media dict's 'url' must be a string.")
                 return cls.of(value["url"], value.get("mime_type", mime_type), value.get("name", name))
             if value.get("data") is not None:
                 data = value["data"]
@@ -166,6 +176,11 @@ class Media:
             file_name = os.path.basename(str(getattr(value, "name", "") or ""))
             return cls(file=value, mime_type=mime_type or _guess(file_name), name=name or file_name)
         raise BadRequest(f"Can't use {type(value).__name__} as media.")
+
+    @classmethod
+    def from_path(cls, path: str | Path, mime_type: str = "", name: str = "") -> Media:
+        """A file on disk. Only for paths your code chose, never one a user gave."""
+        return cls.of(Path(path), mime_type, name)
 
     # ------------------------------------------------------------ reading
 
@@ -297,11 +312,36 @@ def default_storage() -> Any:
     return storages[config.get("MEDIA_STORAGE") or "default"]
 
 
-def _download(url: str, size: int) -> Iterator[bytes]:
+def _client():
+    """An HTTP client that connects only to the addresses ``public_address`` allows, checked at
+    connect time for every request and redirect (no DNS rebinding between check and use)."""
+    import httpcore
     import httpx
 
+    class PublicOnly(httpcore.NetworkBackend):
+        def __init__(self, inner):
+            self.inner = inner
+
+        def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
+            address = public_address(host, port)  # the TLS name and Host header stay the host's
+            return self.inner.connect_tcp(
+                address, port, timeout=timeout, local_address=local_address, socket_options=socket_options
+            )
+
+        def connect_unix_socket(self, path, timeout=None, socket_options=None):
+            raise UnsafeURL("Unix sockets can't be fetched.")
+
+        def sleep(self, seconds):
+            self.inner.sleep(seconds)
+
+    transport = httpx.HTTPTransport()
+    transport._pool._network_backend = PublicOnly(transport._pool._network_backend)
     timeout = float(config.get("MEDIA_FETCH_TIMEOUT") or 120)
-    with httpx.Client(timeout=timeout) as client:
+    return httpx.Client(transport=transport, timeout=timeout, trust_env=False)
+
+
+def _download(url: str, size: int) -> Iterator[bytes]:
+    with _client() as client:
         for _ in range(6):  # each redirect is checked like the first URL
             _check_url(url)
             with client.stream("GET", url) as r:

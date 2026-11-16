@@ -371,11 +371,12 @@ def test_media_of_what_you_have(tmp_path):
     assert Media.of("data:audio/wav;base64,UklGRg==").read() == b"RIFF"
     path = tmp_path / "clip.mp3"
     path.write_bytes(b"ID3abc")
-    from_path = Media.of(str(path))
+    from_path = Media.of(path)
     assert from_path.mime_type == "audio/mpeg" and from_path.name == "clip.mp3" and from_path.read() == b"ID3abc"
     with open(path, "rb") as f:
         assert Media.of(f).read() == b"ID3abc"
     assert Media.of({"data": "SUQz", "mime_type": "audio/mpeg"}).read() == b"ID3"
+    assert Media.from_path(str(path)).read() == b"ID3abc"
     assert Media.of("https://example.com/a.png").url == "https://example.com/a.png"
     with pytest.raises(Exception, match="Can't use"):
         Media.of(3)
@@ -396,8 +397,33 @@ def test_saving_streams_into_storage(settings):
 def test_private_and_odd_urls_are_not_fetched():
     with pytest.raises(UnsafeURL, match="private"):
         Media.of("http://127.0.0.1/secret").read()
+    with pytest.raises(UnsafeURL, match="private"):
+        Media.of("http://localhost:8000/admin").read()
     with pytest.raises(UnsafeURL):
         Media(url="file:///etc/passwd").read()
+
+
+def test_a_string_is_never_read_as_a_path():
+    for value in ("/etc/passwd", "../settings.py", {"url": "/etc/passwd"}, {"url": "file:///etc/passwd"}):
+        with pytest.raises(UnsafeURL):
+            Media.of(value)
+
+
+def test_the_address_is_checked_when_connecting(monkeypatch):
+    """The check is made when the connection is opened, on the address it uses: a name that
+    resolves to a private address then (DNS rebinding) is refused, whatever it said before."""
+    from llm_kit.core.media import types as media_types
+
+    looked_up = []
+
+    def resolve(host, port, **kw):
+        looked_up.append(host)
+        return [(2, 1, 6, "", ("10.0.0.5", port))]
+
+    monkeypatch.setattr(media_types.socket, "getaddrinfo", resolve)
+    with pytest.raises(UnsafeURL, match="private"):
+        Media.of("http://rebind.example/x").read()
+    assert looked_up == ["rebind.example"]  # by the connection, not a separate check
 
 
 def test_media_too_large(settings):
