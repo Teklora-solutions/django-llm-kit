@@ -441,12 +441,27 @@ _VIDEO_STATUS = {"queued": PENDING, "pending": PENDING, "in_progress": RUNNING, 
 def _video_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     args = {"model": self.ref, "prompt": request["prompt"], **kwargs}
     if request.get("image") is not None:
-        args["input_reference"] = request["image"].as_file()
+        args["input_reference"] = _reference(self.ref, request["image"])
     if request.get("seconds") is not None:
         args["seconds"] = str(request["seconds"])
     if request.get("size") is not None:
         args["size"] = request["size"]
     return args
+
+
+# Providers whose video APIs take the reference image as a public URL, not an upload.
+URL_REFERENCES = ("fal_ai",)
+
+
+def _reference(ref: str, image: Any) -> Any:
+    from llm_kit.core.errors import BadRequest
+    from llm_kit.core.touchpoints.env import provider_of
+
+    if provider_of(ref) in URL_REFERENCES:
+        if image.url is None:
+            raise BadRequest(f"{ref} takes the image as a public URL: pass image='https://...'.")
+        return image.url
+    return image.as_file()
 
 
 def video_state(status: Any) -> JobState:
