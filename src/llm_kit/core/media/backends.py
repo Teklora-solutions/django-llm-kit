@@ -233,8 +233,8 @@ def _image_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, A
 
 
 def _edit_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
-    images = [m.upload() for m in request["images"]]
+    images = [m.as_file() for m in request["images"]]
     args = {"model": self.ref, "prompt": request["prompt"], "image": images if len(images) > 1 else images[0]}
     if request.get("mask") is not None:
-        args["mask"] = request["mask"].upload()
+        args["mask"] = request["mask"].as_file()
     return {**args, **_clean(request, "n", "size", "quality"), **kwargs}

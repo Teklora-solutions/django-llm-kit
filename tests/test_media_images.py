@@ -132,5 +132,5 @@ def test_litellm_image_edit(litellm, settings):
     settings.LLM_KIT = {**settings.LLM_KIT, "MEDIA_BACKEND": "litellm"}
     tp(fallbacks=[]).edit_image("night", PNG, mask=PNG, env=env())
     sent = litellm["edit"]
-    assert sent["prompt"] == "night" and sent["image"] == ("file.png", PNG, "image/png")
-    assert sent["mask"] == ("file.png", PNG, "image/png") and sent["model"] == "openai/gpt-image-1"
+    assert sent["prompt"] == "night" and sent["image"].read() == PNG and sent["image"].name == "file.png"
+    assert sent["mask"].read() == PNG and sent["model"] == "openai/gpt-image-1"

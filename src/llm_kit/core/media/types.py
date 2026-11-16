@@ -236,6 +236,15 @@ class Media:
     def b64(self) -> str:
         return base64.b64encode(self.read()).decode()
 
+    def as_file(self) -> Any:
+        """It as an in-memory binary file with a ``name`` (what some HTTP clients need)."""
+        import io
+
+        name, data, _ = self.upload()
+        file = io.BytesIO(data)
+        file.name = name
+        return file
+
     def upload(self) -> tuple[str, bytes, str]:
         """``(name, bytes, mime type)``, the way HTTP clients take a file."""
         data = self.read()
