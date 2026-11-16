@@ -22,6 +22,7 @@ path, or the factory itself. A factory is ``fn(ref, params, api_keys)`` returnin
 from __future__ import annotations
 
 import asyncio
+import base64
 import random
 import threading
 from collections.abc import Callable
@@ -155,6 +156,15 @@ class LiteLLMMedia:
 
     async def agenerate(self, kind: str, request: dict[str, Any], **params: Any) -> MediaResult:
         return await self._op(kind, "_a")(request, self._kwargs(params))
+
+    # documents
+
+    def _ocr(self, request, kwargs):
+        return ocr_result(_litellm().ocr(**_ocr_args(self, request, kwargs)))
+
+    async def _aocr(self, request, kwargs):
+        args = await asyncio.to_thread(_ocr_args, self, request, kwargs)  # reading the document may fetch it
+        return ocr_result(await _litellm().aocr(**args))
 
     # long jobs: _submit_<kind>, _poll_<kind> and their async forms
 
@@ -465,4 +475,50 @@ def video_result(status: Any, content: Any) -> MediaResult:
     media = Media(data=data, mime_type=sniff(data) or "video/mp4", meta=dict(info))
     return MediaResult(
         "video", media=[media], data=info, cost=reported_cost(status), served_model=str(get(status, "model") or "")
+    )
+
+
+# ------------------------------------------------------------------ LiteLLM: OCR
+
+
+def _ocr_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    from llm_kit.core.media.types import sniff
+
+    document = request["document"]
+    if document.url is not None and document.data is None:
+        location = document.url
+        is_image = (document.mime_type or "").startswith("image/")
+    else:
+        data = document.read()
+        mime = document.mime_type or sniff(data) or "application/pdf"
+        location = f"data:{mime};base64,{base64.b64encode(data).decode()}"
+        is_image = mime.startswith("image/")
+    kind = "image_url" if is_image else "document_url"
+    args = {"model": self.ref, "document": {"type": kind, kind: location}, **kwargs}
+    if request.get("pages") is not None:
+        args["pages"] = list(request["pages"])
+    return args
+
+
+def ocr_result(response: Any) -> MediaResult:
+    pages = []
+    for page in get(response, "pages") or []:
+        pages.append({"index": get(page, "index"), "markdown": get(page, "markdown") or ""})
+    usage = get(response, "usage_info") or {}
+    units = {}
+    if (processed := get(usage, "pages_processed")) is not None:
+        units["pages"] = processed
+    if annotated := get(usage, "pages_processed_annotation"):
+        units["annotated_pages"] = annotated
+    data: dict[str, Any] = {"pages": pages}
+    if (annotation := get(response, "document_annotation")) is not None:
+        data["annotation"] = annotation
+    text = "\n\n".join(p["markdown"] for p in pages)
+    return MediaResult(
+        "ocr",
+        text=text,
+        data=data,
+        units=units,
+        cost=reported_cost(response),
+        served_model=str(get(response, "model") or ""),
     )

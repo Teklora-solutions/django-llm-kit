@@ -16,6 +16,7 @@ pip install "django-llm-kit[all]"
 |---|---|---|
 | **Graphs** | Register a LangGraph graph by dotted path; it is compiled with a checkpointer and served over SSE, REST and WebSocket. | [Graphs](guides/graphs.md) |
 | **Touchpoints** | Each place your code calls a model declares its default, fallbacks, required capabilities and who may pick the model. Admins can narrow it without a deploy. | [Touchpoints](guides/touchpoints.md) |
+| **Generated media** | Images, video, speech, transcripts and document text through touchpoints, with the same keys, fallbacks, records and budgets as chat; videos as background jobs. | [Generated media](guides/media.md) |
 | **Agents and subagents** | One harness runs every agent; a subagent is the same harness with another model, prompt and tools. | [Agents](guides/agents.md) |
 | **Tools from your models** | Declare what agents may see on a Django model; llm-kit generates find/save tools limited to the caller's rows, with approvals. | [Model tools](guides/tools.md) |
 | **Model catalogue** | Prices, limits and capabilities for about 12,600 models from models.dev, OpenRouter and LiteLLM. | [Catalogue](guides/catalogue.md) |

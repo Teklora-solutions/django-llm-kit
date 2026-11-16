@@ -117,7 +117,7 @@ def _transcription(request: dict, result: Any) -> dict:
 
 def _ocr(request: dict, result: Any) -> dict:
     pages = result.data.get("pages")
-    return {"pages": len(pages) if isinstance(pages, list) else pages}
+    return {"pages": len(pages) if isinstance(pages, list) else pages}  # what the provider billed wins
 
 
 for _kind in (

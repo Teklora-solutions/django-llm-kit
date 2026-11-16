@@ -234,6 +234,20 @@ What happens to a webhook:
     - `llm_kit.E003` reports an entry that needs a secret and has none;
     - `llm_kit.W004` reports a `param` without `MEDIA_WEBHOOK_URL`.
 
+## Documents (OCR)
+
+```python
+reader = touchpoint("media.reader", default="mistral/mistral-ocr-latest", requires={"kind": "ocr"})
+
+doc = reader.ocr(request.FILES["invoice"])
+doc.text                      # the whole document, in Markdown
+doc.pages                     # [{"index": 0, "markdown": "..."}, ...]
+```
+
+- **`ocr(document, *, pages=None, **params)`** and `aocr(...)`. `document` is a PDF or an image: bytes, a URL, a file or `Media`. `pages` picks pages (`[0, 2]`) on models that take it.
+- **Annotations:** other `params` go to the provider as they are, for example Mistral's annotation formats. A document annotation comes back as `result.annotation`.
+- **Prices:** `units` has `pages` (and `annotated_pages`), priced by the catalogue's `ocr_cost_per_page` and `annotation_cost_per_page`.
+
 ## Settings for each model
 
 Providers don't agree on settings. OpenAI's `alloy` voice doesn't exist at ElevenLabs, and one image API takes `size="1024x1024"` where another takes `aspect_ratio="1:1"`. `model_params` gives each model its own, over the touchpoint's `params`:
@@ -326,3 +340,74 @@ class AcmeMusic:
 ```
 
 Methods without an async version run on a thread in async calls. Return `MediaResult(kind, media=[Media.of(data)], cost=...)`, setting `cost` or `units` when the provider says what it billed.
+
+## Adding a kind of your own
+
+Anything a provider sells can go through a touchpoint: music, 3D models, sound effects, upscaling. A kind of your own takes four steps.
+
+**1. Register the kind** once at startup, for example in your app's `touchpoints.py`:
+
+```python
+from llm_kit.media import MediaKind, register_kind
+
+def by_seconds(request, result):
+    return {"output_seconds": result.data.get("seconds") or request.get("seconds")}
+
+register_kind(MediaKind("music", long=True, measure=by_seconds, description="Music from a prompt."))
+```
+
+**2. Write a backend** for the provider. This one submits a job and checks on it, because songs take a while:
+
+```python
+import httpx
+from llm_kit.media import DONE, FAILED, RUNNING, ContentRefused, JobState, Media, MediaResult
+
+class AcmeMusic:
+    def __init__(self, ref, params, api_keys):
+        self.model = ref.split("/", 1)[1]
+        self.params = params
+        self.http = httpx.Client(base_url="https://api.acme.example", headers={"Authorization": f"Bearer {api_keys[0]}"})
+
+    def submit(self, kind, request, **params):
+        body = {"model": self.model, "prompt": request["prompt"], "duration": request.get("seconds"), **self.params, **params}
+        response = self.http.post("/v1/songs", json=body)
+        if response.status_code == 422 and "policy" in response.text:
+            raise ContentRefused(response.json()["detail"])
+        response.raise_for_status()
+        return response.json()["id"]
+
+    def poll(self, kind, job_id):
+        song = self.http.get(f"/v1/songs/{job_id}").json()
+        if song["status"] == "failed":
+            return JobState(FAILED, error=song.get("error", ""))
+        if song["status"] != "complete":
+            return JobState(RUNNING, progress=song.get("progress"))
+        audio = Media.of(song["audio_url"], "audio/mpeg")
+        return JobState(DONE, result=MediaResult("music", media=[audio], data={"seconds": song["duration"]}, cost=song.get("cost")))
+
+    def cancel(self, kind, job_id):
+        self.http.delete(f"/v1/songs/{job_id}")
+```
+
+A kind that answers at once implements `generate(kind, request, **params)` instead of `submit`/`poll`. Add `agenerate`/`asubmit`/`apoll` for a native async client; without them, async calls run your methods on a thread.
+
+**3. Tell the catalogue about the model**, if it isn't there already. Add a catalogue override in the admin (or `CatalogueOverride`) for `acme/song-2`, with `{"kind": "music", "price_units": {"output_cost_per_second": "0.002"}}`. Then `requires={"kind": "music"}` accepts it, and its calls are priced when the backend doesn't report a cost.
+
+**4. Declare a touchpoint and use it:**
+
+```python
+songs = touchpoint(
+    "media.songs",
+    default="acme/song-2",
+    fallbacks=["acme/song-1"],
+    requires={"kind": "music"},
+    media_backend="myapp.media:AcmeMusic",
+)
+
+result = songs.generate("music", prompt="Upbeat jingle for a bakery", seconds=15)   # waits
+run = songs.start("music", prompt="Upbeat jingle for a bakery", seconds=15, user=request.user)  # background
+```
+
+It gets the same keys, rate limits, fallbacks, refusals, records, prices, budgets, background jobs and [webhooks](#webhooks) as the built-in kinds. A provider's keys come from the usual places (`CREDENTIALS`, stored keys, `ACME_API_KEY`), and a tenant's or user's own keys work too.
+
+**Testing:** point `MEDIA_BACKEND` (or `media_backend=`) at a fake factory that returns `MediaResult`s, as llm-kit's own tests do, so tests never reach the provider.
