@@ -10,7 +10,7 @@ The names below are the supported public API. Anything else, in particular `llm_
 
 | Name | What it is |
 |---|---|
-| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None, adapt_input=None)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint`. `adapt_input(input, ref, info)` gives [each model input it can read](../guides/touchpoints.md#input-for-each-model) |
+| `touchpoint(name, *, default, fallbacks=(), params=None, choice=None, requires=None, description="", backend=None, capture=None, retry=None, adapt_input=None, model_params=None, media_backend=None, fallback_on_refusal=False)` | declare a [touchpoint](../guides/touchpoints.md); returns a `Touchpoint`. `adapt_input(input, ref, info)` gives [each model input it can read](../guides/touchpoints.md#input-for-each-model). `model_params` gives [each model its own params](../guides/media.md#settings-for-each-model); `media_backend` and `fallback_on_refusal` are for [media](../guides/media.md) |
 | `RetryPolicy(attempts=0, max_wait=0.0)`, `RetryPolicy.BATCH`, `.INTERACTIVE`, `.NEVER` | how long a call waits out a [short rate limit](../guides/touchpoints.md#rate-limits-and-fallbacks) before falling back |
 | `AllModelsFailed` | raised when every model of a touchpoint failed; `errors` is `[(model, exception), …]` |
 | `embed(inputs, **params)`, `aembed(...)` | one vector per input, lists [split into the model's batch size](../guides/touchpoints.md#one-vector-per-input); `EmbeddingCountMismatch` (`llm_kit.core.touchpoints.embeddings`) when a model returns a different number |
@@ -27,6 +27,11 @@ The names below are the supported public API. Anything else, in particular `llm_
 | `model(requested=None, *, config=None, retry=None, fallbacks=True, adapt_input=None, **params)` | a LangChain chat model with fallbacks and retry waits; `params` override the touchpoint's for this call; `fallbacks=False` uses only the resolved model; `adapt_input=False` turns the touchpoint's adapter off. The model your factory built is the result's `.bound` (it is never changed) |
 | `complete(prompt, *, schema=None, requested=None, config=None, retry=None, fallbacks=True, **params)` | one-shot reply; a validated `schema` instance when given (native structured output, or JSON parsed from the reply) |
 | `resolve(requested=None, *, config=None)` | the resolution: chosen model, fallbacks, who chose and why. Raises `ModelNotAllowed` or `TouchpointDisabled` |
+| `generate(kind, *, requested=None, config=None, retry=None, fallbacks=True, caller=None, wait=None, params=None, **request)`, `agenerate(...)` | [media](../guides/media.md) of `kind` (`"image"`, `"video"`, `"speech"`, a kind you registered...); returns a `MediaResult` |
+
+## `llm_kit.media`
+
+`Media` (`Media.of(value)`, `read()`, `chunks()`, `save(storage=None, name=None)`, `to_json()`), `MediaResult`, `MediaKind`, `register_kind(kind)`, `get_kind(name)`, `all_kinds()`, `JobState` (`PENDING`, `RUNNING`, `DONE`, `FAILED`), `LiteLLMMedia`, `is_refusal(error)`, and the errors `ContentRefused`, `MediaJobFailed`, `MediaJobTimeout`, `NoMediaReturned`, `MediaTooLarge`, `UnsafeURL`. See [Generated media](../guides/media.md).
 
 ## `llm_kit.agents`
 

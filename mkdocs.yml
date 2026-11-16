@@ -64,6 +64,7 @@ nav:
   - Guides:
       - Graphs: guides/graphs.md
       - Touchpoints: guides/touchpoints.md
+      - Generated media: guides/media.md
       - Agents and subagents: guides/agents.md
       - Model tools: guides/tools.md
       - Model catalogue: guides/catalogue.md

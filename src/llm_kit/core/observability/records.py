@@ -15,7 +15,7 @@ class CallRecord:
     call_id: str
     run_id: str | None  # root run this call belongs to, if any
     started_at: datetime
-    kind: str = "chat"  # chat | embedding
+    kind: str = "chat"  # chat | embedding | a media kind (image, video, speech, transcription, ...)
     key_owner: str = ""  # whose provider key: platform | tenant | user (bring your own key)
     touchpoint: str = ""
     graph: str = ""
@@ -37,6 +37,7 @@ class CallRecord:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    units: dict[str, Any] = field(default_factory=dict)  # what a media call made or read (cost.UNITS)
     usage_estimated: bool = False
     cost: Decimal | None = None
     unpriced: bool = False

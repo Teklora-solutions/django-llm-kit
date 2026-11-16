@@ -26,7 +26,7 @@ CAPABILITY_FIELDS = (
 FIELDS = (
     "name",
     "family",
-    "kind",  # chat | embedding | image | audio | rerank | other
+    "kind",  # one of KINDS
     "canonical_id",
     "input_modalities",
     "output_modalities",
@@ -37,15 +37,48 @@ FIELDS = (
     "open_weights",
     *PRICE_FIELDS,
     "price_tiers",  # [{"above_tokens": int, "price_input": str, ...}]
+    "price_units",  # {"output_cost_per_image": "0.04", ...}: USD per unit (media models); see MEDIA_PRICE_KEYS
     "release_date",
     "knowledge_cutoff",
     "status",  # "" | alpha | beta | deprecated
     "deprecation_date",
 )
 
+KINDS = (
+    "chat",
+    "embedding",
+    "image",  # makes images from a prompt
+    "image_edit",  # changes an image it is given
+    "video",
+    "speech",  # text to speech
+    "transcription",  # speech to text
+    "ocr",
+    "realtime",  # live two-way audio
+    "music",
+    "rerank",
+    "moderation",
+    "other",
+)
+"""What a model does (``requires={"kind": ...}``)."""
+
+
+def is_media_price(key: str) -> bool:
+    """A LiteLLM price key (``output_cost_per_image``, ``input_cost_per_second``,
+    ``output_cost_per_second_720p``, ...) that prices media by a unit other than plain text tokens.
+    Kept as given, in USD per unit, under ``price_units``."""
+    if "_cost_per_" not in key or not key.startswith(("input_", "output_")):
+        return False
+    if any(word in key for word in ("_batches", "_priority", "_flex", "_above_", "dbu", "reasoning")):
+        return False
+    return key not in ("input_cost_per_token", "output_cost_per_token")
+
+
 # Highest priority first. "override" is an admin override and always wins.
 PRICE_PRECEDENCE = ("override", "litellm", "models.dev", "openrouter", "openrouter-embeddings")
 DEFAULT_PRECEDENCE = ("override", "models.dev", "litellm", "openrouter", "openrouter-embeddings")
+# Fields whose sources rank differently. LiteLLM says what a media model does (its "mode");
+# the others list most of them as chat models.
+FIELD_PRECEDENCE = {"kind": ("override", "litellm", "models.dev", "openrouter", "openrouter-embeddings")}
 
 # A provider's own source beats aggregators for that provider's models
 # (e.g. OpenRouter's API is the price OpenRouter actually bills).
@@ -106,4 +139,4 @@ def model_ref(key: Key) -> str:
 
 def clean(partial: dict[str, Any]) -> dict[str, Any]:
     """Drop None/empty values and unknown fields."""
-    return {k: v for k, v in partial.items() if k in FIELDS and v is not None and v != "" and v != []}
+    return {k: v for k, v in partial.items() if k in FIELDS and v is not None and v != "" and v != [] and v != {}}

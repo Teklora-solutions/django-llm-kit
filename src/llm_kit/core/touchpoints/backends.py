@@ -556,7 +556,7 @@ def build_for(
     models, refs, owners, infos = [], [], [], []
     for index, ref in enumerate(resolution.candidates):
         for owner, keys in key_sets(env, ref, tp):  # one attempt per owner (BYOK: theirs, then yours)
-            built = factory(ref, dict(resolution.params), keys)
+            built = factory(ref, tp.params_for(ref, resolution.params), keys)
             # Added as call config, never set on the factory's model: a factory may return one
             # shared model for every call (its client lives there), and must find it unchanged.
             model = wrap(

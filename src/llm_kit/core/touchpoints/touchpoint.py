@@ -70,6 +70,11 @@ class Touchpoint:
     # fn(input, ref, info) -> input, called for each model just before it is tried (also after a
     # fallback), so each gets input it can read; a dotted path or a callable.
     adapt_input: Any = None
+    # {ref or pattern: params} applied to that model only, over ``params`` (voices, sizes and
+    # aspect ratios differ by provider); patterns like "openai/*", the most specific last.
+    model_params: dict[str, dict[str, Any]] = field(default_factory=dict)
+    media_backend: Any = None  # media calls' backend; None = LLM_KIT["MEDIA_BACKEND"]
+    fallback_on_refusal: bool = False  # a media call refused under a content policy tries the next model
 
     def __post_init__(self) -> None:
         bad = [k for k in self.requires if k not in REQUIREMENT_KEYS]
@@ -80,6 +85,20 @@ class Touchpoint:
         if isinstance(self.fallbacks, str):
             object.__setattr__(self, "fallbacks", (self.fallbacks,))
         object.__setattr__(self, "retry", RetryPolicy.coerce(self.retry))
+
+    def params_for(self, ref: str, params: dict[str, Any]) -> dict[str, Any]:
+        """``params`` with this touchpoint's ``model_params`` for ``ref`` on top."""
+        if not self.model_params:
+            return dict(params)
+        import fnmatch
+
+        from llm_kit.core.touchpoints.embeddings import _specificity
+
+        out = dict(params)
+        matching = [p for p in self.model_params if p == ref or fnmatch.fnmatchcase(ref, p)]
+        for pattern in sorted(matching, key=_specificity):
+            out.update(self.model_params[pattern] or {})
+        return out
 
     # ----------------------------------------------------------- resolution
 
@@ -264,6 +283,64 @@ class Touchpoint:
         )
         return await embeddings.run_async(call, items, params)
 
+    # ---------------------------------------------------------------- media
+
+    def _media(self, kind, requested, config, env, retry, fallbacks, caller):
+        from llm_kit.core.media import calls
+        from llm_kit.core.media.kinds import get_kind
+
+        return calls.prepare(
+            self,
+            get_kind(kind),
+            requested=requested,
+            config_=with_caller(config, caller),
+            env=env,
+            retry=retry,
+            fallbacks=fallbacks,
+        )
+
+    def generate(
+        self,
+        kind: str,
+        *,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        wait: float | None = None,
+        params: dict[str, Any] | None = None,
+        **request: Any,
+    ) -> Any:
+        """Make (or read) media of ``kind`` (``"image"``, ``"video"``, ``"speech"``, a kind you
+        registered...) from ``request`` (``prompt=``, ``text=``, ``audio=``...). Returns a
+        ``MediaResult``. ``params`` go to the provider as they are. The kind's own method
+        (``image()``, ``speak()``...) is easier where there is one. See ``llm_kit.core.media``."""
+        from llm_kit.core.media import calls
+
+        call = self._media(kind, requested, config, env, retry, fallbacks, caller)
+        return calls.run_sync(call, request, dict(params or {}), wait)
+
+    async def agenerate(
+        self,
+        kind: str,
+        *,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        wait: float | None = None,
+        params: dict[str, Any] | None = None,
+        **request: Any,
+    ) -> Any:
+        from llm_kit.core.media import calls
+
+        call = self._media(kind, requested, config, env, retry, fallbacks, caller)
+        return await calls.run_async(call, request, dict(params or {}), wait)
+
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 
@@ -379,6 +456,9 @@ def touchpoint(
     settable: Any = None,
     embedding_backend: Any = None,
     adapt_input: Any = None,
+    model_params: dict[str, dict[str, Any]] | None = None,
+    media_backend: Any = None,
+    fallback_on_refusal: bool = False,
 ) -> Touchpoint:
     """Declare and register a touchpoint. Re-declaring the same name replaces it (module reloads).
 
@@ -393,7 +473,13 @@ def touchpoint(
     model just before that model is tried, fallbacks included, with the model's ref and catalogue
     entry (``ModelInfo`` or None): give each model input it can read (audio it can hear, or a
     transcript; a file reference only the provider that holds the file can open). It may be async
-    in async calls. If it raises, that model is skipped."""
+    in async calls. If it raises, that model is skipped.
+
+    ``model_params`` (``{ref or pattern: params}``) adds parameters for one model only, over
+    ``params``: a voice, size or aspect ratio another provider doesn't have. ``media_backend``
+    makes this touchpoint's media (``image()``, ``video()``, ``speak()``...; default
+    ``LLM_KIT["MEDIA_BACKEND"]``). ``fallback_on_refusal=True`` lets a media call that a provider
+    refused under its content policy try the next model (off by default)."""
     tp = Touchpoint(
         name=name,
         default=default,
@@ -409,6 +495,9 @@ def touchpoint(
         settable=settable,
         embedding_backend=embedding_backend,
         adapt_input=adapt_input,
+        model_params={k: dict(v or {}) for k, v in (model_params or {}).items()},
+        media_backend=media_backend,
+        fallback_on_refusal=fallback_on_refusal,
     )
     with _lock:
         _registry[name] = tp

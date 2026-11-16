@@ -43,6 +43,7 @@ class Tree:
     budget: Decimal | None = None  # USD this request may spend; None = no limit
     # model -> [input, output, cache_read, cache_write, reasoning] tokens used so far
     usage: dict[str, list[int]] = field(default_factory=dict)
+    priced: Decimal = Decimal(0)  # USD of calls priced as they ended (media calls)
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -66,6 +67,12 @@ class Tree:
             for i, n in enumerate(tokens):
                 total[i] += int(n or 0)
 
+    def add_cost(self, cost: Any) -> None:
+        """Count a call whose price is known already (a media call) towards the budget."""
+        if cost:
+            with self._lock:
+                self.priced += Decimal(str(cost))
+
     def spent(self) -> Decimal:
         """USD spent so far, from catalogue prices (models with no known price count as 0)."""
         from llm_kit.core.observability.cost import price_call
@@ -74,7 +81,7 @@ class Tree:
         lookup = recorder.price_lookup
         with self._lock:
             usage = {m: list(t) for m, t in self.usage.items()}
-        total = Decimal(0)
+            total = self.priced
         for model, (i, o, cr, cw, r) in usage.items():
             try:
                 prices = lookup(model) if lookup is not None and model else None

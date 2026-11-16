@@ -59,6 +59,14 @@ LLM_KIT = {
 | `EMBEDDING_BACKEND` | `"auto"` | `litellm`, `langchain`, or a dotted path to `fn(ref, params, api_keys)` returning an embedder ([embeddings](../guides/touchpoints.md#embeddings)) |
 | `EMBEDDING_BATCH_SIZE` | `{}` | the most inputs one embedding call to a model may take, `{"vertex_ai/gemini-embedding-2": 1}` (patterns; `0`: no limit). Lists are [split into calls of that size](../guides/touchpoints.md#one-vector-per-input) |
 | `EMBEDDING_CONCURRENCY` | `4` | calls `aembed()` runs at once when it splits a list |
+| `MEDIA_BACKEND` | `"auto"` | who makes [media](../guides/media.md): `litellm` (`auto` is the same), or a dotted path to `fn(ref, params, api_keys)` returning a [media backend](../guides/media.md#your-own-backend) |
+| `MEDIA_POLL_EVERY` | `5` | seconds between checks on a [long job](../guides/media.md#long-jobs) (a video) |
+| `MEDIA_JOB_WAIT` | `900` | seconds a call waits for a long job before `MediaJobTimeout`; per call: `wait=` |
+| `MEDIA_STORAGE` | `"default"` | the `STORAGES` alias `Media.save()` uses |
+| `MEDIA_PATH` | `"llm_kit/media/"` | where `Media.save()` names files when you don't |
+| `MEDIA_MAX_BYTES` | `1073741824` | the most bytes the kit loads or saves for one piece of media (`0`: no limit) |
+| `MEDIA_FETCH_TIMEOUT` | `120` | seconds a download of media may take |
+| `MEDIA_FETCH_PRIVATE` | `False` | let the kit fetch URLs on private addresses (off: a URL a user gave can't reach your own network) |
 | `LITELLM_ROUTER` | `{"routing_strategy": "simple-shuffle", "num_retries": 0}` | kwargs for the LiteLLM Router used with key pools |
 | `CREDENTIALS` | `None` | dotted path to `fn(provider)` returning a secret, a list of secrets, or `None`; asked before stored keys and env vars |
 | `ENCRYPTION_KEYS` | `None` | Fernet keys or passphrases for provider keys stored in the database, newest first |

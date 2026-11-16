@@ -6,6 +6,15 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Added
 
+- Generated media through touchpoints (#48): `tp.generate(kind, **request)` / `agenerate` make images, video, speech, transcripts, document text, and kinds you register (`register_kind(MediaKind(...))`). They get the same keys, rate limits, retry waits, fallbacks, records and budgets as chat and embeddings ([guide](docs/guides/media.md)).
+  - **Backends:** LiteLLM by default (`MEDIA_BACKEND`), or `touchpoint(..., media_backend=)` with your own `fn(ref, params, api_keys)`.
+  - **Long jobs** (video) are submitted, then checked every `MEDIA_POLL_EVERY` seconds for at most `MEDIA_JOB_WAIT`. A job that runs out of time raises `MediaJobTimeout` with its id and is never sent to the next model.
+  - **Refusals:** a provider's content-policy refusal raises `ContentRefused` and doesn't try the next model unless the touchpoint has `fallback_on_refusal=True`.
+  - **`Media`** takes bytes, paths, URLs, `data:` URIs and files, and streams into Django storage (`save()`, `MEDIA_STORAGE`, `MEDIA_PATH`). Fetching is limited to public http(s) URLs (`MEDIA_FETCH_PRIVATE`) and `MEDIA_MAX_BYTES`.
+  - **Records and prices:** `LLMCall.units` records what a media call was billed by (images, seconds, characters...) (migration 0021). The cost is what the backend reported, else the units times the catalogue's per-unit prices.
+- `touchpoint(..., model_params={ref or pattern: params})`: parameters for one model only, over `params`, for chat, embeddings and media.
+- The catalogue keeps media models' prices by unit (`price_units`: per image, second, character, pixel, resolution...).
+
 - Tool calls have a time limit, so a tool that hangs no longer holds an agent until the request gives up.
   - **The limit:** each call may take `TOOL_TIMEOUT` seconds (90), or per tool `tools.register(..., timeout=)` / `metadata={"llm_kit_timeout": s}`.
   - **Past it:** the call ends as an error result (`status="error"`) that tells the model the tool didn't finish and its result is unknown, and the run goes on. LangChain's callbacks record the call as failed.
@@ -66,6 +75,7 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ### Changed
 
+- The catalogue labels media models with what they do: `image`, `image_edit`, `video`, `speech`, `transcription`, `ocr`, `realtime`, `music`, `rerank`, `moderation`. These replace the broad `audio` and `image`, and models are re-labelled on the next catalogue sync. `requires={"kind": "audio"}` matches nothing after that: use `speech` or `transcription`. LiteLLM decides a model's kind over the other sources.
 - Tool errors shown to the model: a `ToolException`'s message (how a tool reports a failure) and invalid arguments are shown as before. For any other exception only its class name is shown, unless `EXPOSE_ERRORS`; the text used to include the exception's message.
 - Sync tools in an agent run now run on llm-kit's tool threads (outside a database transaction), so they can be stopped at their time limit. ContextVars carry over; `threading.local` values don't.
 - Starting a background run over SSE or WebSocket streams it from its first event (`thread`, `run`, then the run's events with `seq`), instead of `run` then a `snapshot`. Watching a run (`watch/`, WebSocket `watch` without `after`) still begins with a `snapshot`.
