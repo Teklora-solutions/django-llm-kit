@@ -228,6 +228,8 @@ class Media:
     def extension(self) -> str:
         if self.name and "." in self.name:
             return "." + self.name.rsplit(".", 1)[1]
+        if not self.mime_type and self.data is not None:
+            self.mime_type = sniff(self.data)
         return extension_for(self.mime_type)
 
     def data_uri(self) -> str:
@@ -287,6 +289,8 @@ class Media:
 
     def to_json(self) -> dict[str, Any]:
         """What can be stored or sent: never the bytes."""
+        if not self.mime_type and self.data is not None:
+            self.mime_type = sniff(self.data)
         out: dict[str, Any] = {"mime_type": self.mime_type}
         if self.name:
             out["name"] = self.name

@@ -1,6 +1,6 @@
 """Background runs over REST.
 
-    GET  runs/?status=running&thread=<id>   the requester's runs, newest first (up to 50)
+    GET  runs/?status=running&thread=<id>&kind=media   the requester's runs, newest first (up to 50)
     GET  runs/<id>/                         one run
     POST runs/<id>/cancel/                  ask it to stop
 
@@ -47,6 +47,10 @@ class RunListView(APIView):
             if wanted not in dict(STATUS):
                 return Response({"detail": f"status must be one of {', '.join(dict(STATUS))}."}, status=400)
             qs = qs.filter(status=wanted)
+        if kind := request.query_params.get("kind"):
+            if kind not in ("graph", "media"):
+                return Response({"detail": "kind must be graph or media."}, status=400)
+            qs = qs.filter(kind=kind)
         if thread := request.query_params.get("thread"):
             try:
                 qs = qs.filter(thread_id=uuid.UUID(thread))

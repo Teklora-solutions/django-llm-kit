@@ -67,6 +67,10 @@ LLM_KIT = {
 | `MEDIA_MAX_BYTES` | `1073741824` | the most bytes the kit loads or saves for one piece of media (`0`: no limit) |
 | `MEDIA_FETCH_TIMEOUT` | `120` | seconds a download of media may take |
 | `MEDIA_FETCH_PRIVATE` | `False` | let the kit fetch URLs on private addresses (off: a URL a user gave can't reach your own network) |
+| `MEDIA_BACKGROUND_WAIT` | `3600` | seconds a [background media job](../guides/media.md#background-jobs) waits for its provider; per job: `wait=` |
+| `MEDIA_WEBHOOKS` | `{}` | providers whose [webhooks](../guides/media.md#webhooks) are on: `{"replicate": {"secret": "whsec_..."}}` (`verify`, `secret`, `id`, `param`) |
+| `MEDIA_WEBHOOK_URL` | `""` | the URL providers call, with `{provider}`: `"https://app.example.com/llm/media/webhooks/{provider}/"` |
+| `MEDIA_WEBHOOK_POLL_EVERY` | `60` | seconds between checks on a job while its provider's webhooks are on |
 | `LITELLM_ROUTER` | `{"routing_strategy": "simple-shuffle", "num_retries": 0}` | kwargs for the LiteLLM Router used with key pools |
 | `CREDENTIALS` | `None` | dotted path to `fn(provider)` returning a secret, a list of secrets, or `None`; asked before stored keys and env vars |
 | `ENCRYPTION_KEYS` | `None` | Fernet keys or passphrases for provider keys stored in the database, newest first |

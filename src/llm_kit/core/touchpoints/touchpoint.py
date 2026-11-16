@@ -545,6 +545,110 @@ class Touchpoint:
         options = _options(requested, config, env, retry, fallbacks, caller)
         return await self._arun_media("transcription", request, options, params)
 
+    def video(
+        self,
+        prompt: str,
+        *,
+        image: Any = None,
+        seconds: float | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        wait: float | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        """Make a video from ``prompt`` (and ``image``, its first frame or reference), waiting for
+        it: at most ``wait`` seconds (``MEDIA_JOB_WAIT``). Videos take minutes: in a request,
+        prefer ``start_video()``, which runs it in the background. A ``MediaResult``."""
+        request = _video_request(prompt, image, seconds, size, resolution)
+        options = _options(requested, config, env, retry, fallbacks, caller, wait=wait)
+        return self._run_media("video", request, options, params)
+
+    async def avideo(
+        self,
+        prompt: str,
+        *,
+        image: Any = None,
+        seconds: float | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        wait: float | None = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        request = _video_request(prompt, image, seconds, size, resolution)
+        options = _options(requested, config, env, retry, fallbacks, caller, wait=wait)
+        return await self._arun_media("video", request, options, params)
+
+    def start(
+        self,
+        kind: str,
+        *,
+        owner: Any = None,
+        user: Any = None,
+        tenant: Any = None,
+        requested: str | None = None,
+        wait: float | None = None,
+        params: dict[str, Any] | None = None,
+        **request: Any,
+    ) -> Any:
+        """Make media of ``kind`` in the background (Django): returns its ``BackgroundRun`` at once,
+        to watch, cancel, or hear about through ``media_job_finished``. See ``llm_kit.media.jobs``."""
+        from llm_kit.media import jobs
+
+        return jobs.start(
+            self,
+            kind,
+            request,
+            params=params,
+            requested=requested,
+            owner=owner,
+            user=user,
+            tenant=tenant,
+            wait=wait,
+        )
+
+    def start_video(
+        self,
+        prompt: str,
+        *,
+        image: Any = None,
+        seconds: float | None = None,
+        size: str | None = None,
+        resolution: str | None = None,
+        owner: Any = None,
+        user: Any = None,
+        tenant: Any = None,
+        requested: str | None = None,
+        wait: float | None = None,
+        **params: Any,
+    ) -> Any:
+        """``video()`` in the background (Django): returns its ``BackgroundRun`` at once."""
+        request = _drop_none(_video_request(prompt, image, seconds, size, resolution))
+        return self.start(
+            "video", owner=owner, user=user, tenant=tenant, requested=requested, wait=wait, params=params, **request
+        )
+
+    async def astart(self, kind: str, **kw: Any) -> Any:
+        from asgiref.sync import sync_to_async
+
+        return await sync_to_async(self.start)(kind, **kw)
+
+    async def astart_video(self, prompt: str, **kw: Any) -> Any:
+        from asgiref.sync import sync_to_async
+
+        return await sync_to_async(self.start_video)(prompt, **kw)
+
     def run_config(self, config: RunnableConfig | None = None) -> RunnableConfig | None:
         """The config to invoke this touchpoint's ``model()`` with, so the call is recorded.
 
@@ -629,6 +733,18 @@ def _transcription_request(audio, language, prompt, format, timestamps, temperat
         "timestamps": timestamps or None,
         "temperature": temperature,
         "duration": audio_seconds(media) if media.data is not None else None,
+    }
+
+
+def _video_request(prompt, image, seconds, size, resolution) -> dict[str, Any]:
+    from llm_kit.core.media.types import Media
+
+    return {
+        "prompt": prompt,
+        "image": Media.of(image) if image is not None else None,
+        "seconds": seconds,
+        "size": size,
+        "resolution": resolution,
     }
 
 

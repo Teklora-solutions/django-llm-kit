@@ -61,6 +61,8 @@ It returns a `MediaResult`:
 | `transcription` | speech written down | `transcription` |
 | `ocr` | the text of a document or image | `ocr` |
 
+Only `video` is a [long job](#long-jobs) among the built-in kinds. Any kind can still run [in the background](#background-jobs).
+
 The catalogue labels each media model with what it does, from LiteLLM's model data, so `requires={"kind": "transcription"}` keeps a speech-to-text touchpoint's fallbacks to speech-to-text models. The catalogue also has `realtime`, `music`, `rerank` and `moderation`.
 
 ### Kinds of your own
@@ -149,6 +151,88 @@ timed.segments, timed.words, timed.duration, timed.language
 - **`timestamps=True`** (segments) or `["word", "segment"]` asks for timings, and the format becomes `verbose_json` unless you set one. Not every model gives timings.
 - **Prices:** `units` has `input_seconds`, from the provider, or from the clip when it is WAV. Models billed by tokens record `input_audio_tokens`.
 - **Size:** providers limit the size of a clip (OpenAI's is 25 MB). Split longer recordings before sending them.
+
+## Video
+
+```python
+clips = touchpoint(
+    "media.clips",
+    default="openai/sora-2",
+    fallbacks=["gemini/veo-3.0-generate-preview", "runwayml/gen4_turbo"],
+    requires={"kind": "video"},
+)
+
+run = clips.start_video("Waves on a rocky shore at dusk", seconds=8, size="1280x720", user=request.user)
+# returns at once: a BackgroundRun (kind="media") to watch, cancel or wait for
+
+result = clips.video("A paper boat on a stream", image=first_frame)   # waits (MEDIA_JOB_WAIT)
+```
+
+- **`video(prompt, *, image=None, seconds=None, size=None, resolution=None, wait=None, **params)`** and `avideo(...)` wait for the video. `image` is the first frame or a reference. `wait` defaults to `MEDIA_JOB_WAIT` (900 seconds).
+- **`start_video(...)`** takes the same arguments plus `owner`/`user`/`tenant` and runs the job [in the background](#background-jobs). Use it in requests: a video takes minutes.
+- The video is downloaded when the job finishes. Providers keep it only for a while.
+- **Prices:** `units` has `videos`, `output_seconds`, `size` and `resolution` (`720p` from `1280x720`, or as you give it). These match the catalogue's per-second prices by resolution.
+
+## Background jobs
+
+`tp.start_video(...)`, or `tp.start(kind, *, owner=None, user=None, tenant=None, requested=None, wait=None, params=None, **request)` for any kind, saves a `BackgroundRun` with `kind="media"` and returns it at once. It runs where [background runs](streaming.md#background-runs) run (`RUN_EXECUTOR`: a thread, Celery, Django-Q2 or your own) and has what they have:
+
+- **Before it starts:** a caller over budget, a model they may not use or a missing key is refused when you call `start`, before anything is saved. It acts for its owner: their keys, saved settings and budgets.
+- **Watching:** `background.watch(run)`, `GET llm/runs/<id>/watch/`, and the WebSocket `watch` message. A watcher gets these events:
+    - `progress`: first `{"status": "submitted", "job": ...}`, then the provider's `status` and `progress`;
+    - `media`: the result;
+    - `status`: the run's final status.
+- **Cancelling:** `run.cancel()` from any process. The provider's job is cancelled too when the backend can do that.
+- **Listing:** `GET llm/api/runs/?kind=media`.
+- **Lost runs:** detected as for other background runs.
+- **When it ends:** the `run_finished` signal fires, and so does `llm_kit.media.signals.media_job_finished` (`run`, `status`, `result`, `error`). Use them to tell your users (a push, an email) or call your own webhooks.
+
+When the job is done, its media are saved to storage (`MEDIA_STORAGE`, as `MEDIA_PATH/jobs/<run id>/1.mp4`). `run.result` has their `name` and `url`, plus the `text`, `units`, `cost`, `model` and the provider's `job` id. While the job runs, `run.result["job"]` already has that id.
+
+A job waits up to `MEDIA_BACKGROUND_WAIT` seconds (3,600; per job `wait=`). Past that it ends as `error` and keeps the job id: the provider may still finish it.
+
+A media job has no thread. The rules for who may watch, list or cancel it are the thread rules, applied to whoever started it: its user, its visitor, or staff.
+
+Media given to a job (an image to animate) is kept with the run until it runs, up to 25 MB. Pass a URL for anything larger.
+
+## Webhooks
+
+A job checks on its provider every `MEDIA_POLL_EVERY` seconds. That works with every provider and stays on. A provider that sends webhooks can say when a job changed instead:
+
+```python
+LLM_KIT = {
+    "MEDIA_WEBHOOKS": {
+        "replicate": {"secret": "whsec_...", "param": "webhook"},
+        "openai": {"secret": "whsec_..."},          # the URL is set in OpenAI's dashboard
+        "fal_ai": {"param": "webhook_url"},
+        "acme": {"verify": "hmac", "header": "X-Acme-Signature", "secret": "...", "id": "job.id"},
+        "other": {"verify": "myapp.hooks:verify", "id": "data.job_id"},
+    },
+    "MEDIA_WEBHOOK_URL": "https://app.example.com/llm/media/webhooks/{provider}/",
+}
+```
+
+The route is `POST llm/media/webhooks/<provider>/`, included with `llm_kit.transport.sse.urls`. Each provider's entry has these keys:
+
+| Key | What it is |
+|---|---|
+| `verify` | how a webhook is checked: `"standard"` ([Standard Webhooks](https://www.standardwebhooks.com/), used by Replicate and OpenAI), `"hmac"` (an HMAC-SHA256 of the body in `header`), `"fal"` (fal's ED25519 signatures, checked with fal's published keys; needs `cryptography`), or a dotted path to your own `fn(request, config) -> bool`. Replicate, OpenAI and fal have theirs by default |
+| `secret` | the signing secret, for `standard` and `hmac` |
+| `id` | where the job id is in the JSON body (dotted). There are defaults for Replicate, OpenAI and fal |
+| `param` | the provider parameter that takes the webhook URL when a job is submitted, sent with `MEDIA_WEBHOOK_URL`. Leave it out when the URL is set in the provider's dashboard, and check what your provider's API calls it |
+
+What happens to a webhook:
+
+- **A checked webhook** for a running job wakes that job, which asks the provider at once.
+- **The body isn't trusted:** a webhook only says "look now". The result always comes from the provider.
+- **While webhooks are on** for a provider, its jobs check only every `MEDIA_WEBHOOK_POLL_EVERY` seconds (60), in case a webhook never comes. Local development, where providers can't reach you, still finishes jobs this way.
+- **Responses:**
+    - a webhook that fails its check gets 401;
+    - one for a provider without an entry gets 404;
+    - one for no running job gets 202 and changes nothing.
+- **System checks:**
+    - `llm_kit.E003` reports an entry that needs a secret and has none;
+    - `llm_kit.W004` reports a `param` without `MEDIA_WEBHOOK_URL`.
 
 ## Settings for each model
 
