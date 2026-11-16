@@ -152,6 +152,21 @@ class LiteLLMMedia:
         args = await asyncio.to_thread(_edit_args, self, request, kwargs)  # reading the images may fetch them
         return images_result("image_edit", await _litellm().aimage_edit(**args))
 
+    # speech and transcription
+
+    def _speech(self, request, kwargs):
+        return speech_result(request, _litellm().speech(**_speech_args(self, request, kwargs)))
+
+    async def _aspeech(self, request, kwargs):
+        return speech_result(request, await _litellm().aspeech(**_speech_args(self, request, kwargs)))
+
+    def _transcription(self, request, kwargs):
+        return transcription_result(_litellm().transcription(**_transcription_args(self, request, kwargs)))
+
+    async def _atranscription(self, request, kwargs):
+        args = await asyncio.to_thread(_transcription_args, self, request, kwargs)  # reading the audio may fetch it
+        return transcription_result(await _litellm().atranscription(**args))
+
 
 _factories: dict[str, MediaFactory] = {}
 _lock = threading.Lock()
@@ -238,3 +253,99 @@ def _edit_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, An
     if request.get("mask") is not None:
         args["mask"] = request["mask"].as_file()
     return {**args, **_clean(request, "n", "size", "quality"), **kwargs}
+
+
+# ------------------------------------------------------------------ LiteLLM: speech and transcription
+
+AUDIO_TYPES = {
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "opus": "audio/opus",
+    "aac": "audio/aac",
+    "flac": "audio/flac",
+    "pcm": "audio/L16",
+    "ogg": "audio/ogg",
+}
+
+
+def _speech_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    args = {"model": self.ref, "input": request["text"], **kwargs}
+    if request.get("format"):
+        args["response_format"] = request["format"]
+    return {**args, **_clean(request, "voice", "speed", "instructions")}
+
+
+def speech_result(request: dict[str, Any], response: Any) -> MediaResult:
+    from llm_kit.core.media.types import Media, audio_seconds, sniff
+
+    data = response if isinstance(response, (bytes, bytearray)) else getattr(response, "content", None)
+    if data is None and callable(getattr(response, "read", None)):
+        data = response.read()
+    data = bytes(data or b"")
+    mime = sniff(data) or AUDIO_TYPES.get(str(request.get("format") or "mp3"), "audio/mpeg")
+    media = Media(data=data, mime_type=mime) if data else None
+    seconds = audio_seconds(media) if media is not None else None
+    return MediaResult(
+        "speech",
+        media=[media] if media is not None else [],
+        data={"duration": seconds} if seconds else {},
+        cost=reported_cost(response),
+    )
+
+
+def _transcription_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    args = {"model": self.ref, "file": request["audio"].upload(), **kwargs}
+    fmt = request.get("format")
+    timestamps = request.get("timestamps")
+    if timestamps:
+        args["timestamp_granularities"] = list(timestamps)
+        fmt = fmt or "verbose_json"
+    if fmt:
+        args["response_format"] = fmt
+    return {**args, **_clean(request, "language", "prompt", "temperature")}
+
+
+def transcription_result(response: Any) -> MediaResult:
+    data: dict[str, Any] = {}
+    for name in ("language", "duration", "segments", "words"):
+        value = get(response, name)
+        if value is not None:
+            data[name] = _plain(value)
+    usage = get(response, "usage")
+    units: dict[str, Any] = {}
+    tokens_in = tokens_out = None
+    if usage is not None:
+        if get(usage, "type") == "duration" and get(usage, "seconds") is not None:
+            data.setdefault("duration", get(usage, "seconds"))
+        tokens_out = get(usage, "output_tokens")
+        details = get(usage, "input_token_details") or get(usage, "input_tokens_details") or {}
+        audio_tokens = get(details, "audio_tokens")
+        if audio_tokens:
+            units["input_audio_tokens"] = audio_tokens
+            tokens_in = get(details, "text_tokens") or 0
+        else:
+            tokens_in = get(usage, "input_tokens")
+    text = get(response, "text")
+    if text is None and isinstance(response, str):
+        text = response
+    return MediaResult(
+        "transcription",
+        text=text or "",
+        data=data,
+        units=units,
+        cost=reported_cost(response),
+        input_tokens=tokens_in,
+        output_tokens=tokens_out,
+    )
+
+
+def _plain(value: Any) -> Any:
+    """Provider objects as plain lists and dicts."""
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _plain(v) for k, v in value.items()}
+    dump = getattr(value, "model_dump", None) or getattr(value, "dict", None)
+    if callable(dump):
+        return _plain(dump())
+    return value

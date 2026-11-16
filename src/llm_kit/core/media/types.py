@@ -299,6 +299,21 @@ class Media:
         return out
 
 
+def audio_seconds(media: Media) -> float | None:
+    """How long a WAV clip is (None for other formats: the provider says, or it is unknown)."""
+    if media.data is None or (media.mime_type or sniff(media.data)) not in ("audio/wav", "audio/x-wav"):
+        return None
+    import io
+    import wave
+
+    try:
+        with wave.open(io.BytesIO(media.data)) as clip:
+            rate = clip.getframerate()
+            return round(clip.getnframes() / rate, 3) if rate else None
+    except (wave.Error, EOFError):
+        return None
+
+
 def _jsonable(value: Any) -> bool:
     return isinstance(value, (str, int, float, bool, type(None), list, dict))
 

@@ -105,6 +105,51 @@ edited = editor.edit_image("Make it night", result.first, mask=mask_png)
 - **Downloads:** images the provider returns as URLs are downloaded before the call returns, because those URLs often expire within the hour. `fetch=False` keeps the URLs instead.
 - **Prices:** `units` has `images`, `size` and `quality`, `input_images` for edits, and image tokens for models billed by tokens. LiteLLM's reported cost is used when it gives one.
 
+## Speech
+
+```python
+voiceover = touchpoint(
+    "media.voiceover",
+    default="openai/gpt-4o-mini-tts",
+    fallbacks=["elevenlabs/eleven_multilingual_v2"],
+    requires={"kind": "speech"},
+    model_params={"openai/*": {"voice": "alloy"}, "elevenlabs/*": {"voice": "21m00Tcm4TlvDq8ikWAM"}},
+)
+
+audio = voiceover.speak("Welcome back to your workspace.", format="mp3")
+audio.first.save(name="greetings/welcome.mp3")
+```
+
+- **`speak(text, *, voice=None, format=None, speed=None, instructions=None, **params)`** and `aspeak(...)`.
+- **`voice`** is the provider's voice name or id. Set it per model with [`model_params`](#settings-for-each-model): no two providers share voices.
+- **`format`** is `mp3` (most providers' default), `wav`, `opus`, `aac`, `flac` or `pcm`.
+- **`instructions`** steer the delivery (tone, pace) on models that take them.
+- **Prices:** `units` has `characters`, and `output_seconds` when the length is known (a WAV clip, or the provider says).
+
+## Transcription
+
+```python
+notes = touchpoint(
+    "media.notes",
+    default="openai/gpt-4o-transcribe",
+    fallbacks=["groq/whisper-large-v3", "deepgram/nova-3"],
+    requires={"kind": "transcription"},
+)
+
+result = notes.transcribe(request.FILES["audio"], language="en")
+result.text
+
+timed = notes.transcribe(clip, timestamps=["word", "segment"], requested="openai/whisper-1")
+timed.segments, timed.words, timed.duration, timed.language
+```
+
+- **`transcribe(audio, *, language=None, prompt=None, format=None, timestamps=None, temperature=None, **params)`** and `atranscribe(...)`. `audio` is bytes, a URL, an uploaded file or `Media`.
+- **Hints:** `language` (`"en"`) and `prompt` (names and spellings to expect) help the model.
+- **`format`** is `json`, `text`, `srt`, `vtt` or `verbose_json`. With `srt` or `vtt` the subtitles are the result's `text`.
+- **`timestamps=True`** (segments) or `["word", "segment"]` asks for timings, and the format becomes `verbose_json` unless you set one. Not every model gives timings.
+- **Prices:** `units` has `input_seconds`, from the provider, or from the clip when it is WAV. Models billed by tokens record `input_audio_tokens`.
+- **Size:** providers limit the size of a clip (OpenAI's is 25 MB). Split longer recordings before sending them.
+
 ## Settings for each model
 
 Providers don't agree on settings. OpenAI's `alloy` voice doesn't exist at ElevenLabs, and one image API takes `size="1024x1024"` where another takes `aspect_ratio="1:1"`. `model_params` gives each model its own, over the touchpoint's `params`:
