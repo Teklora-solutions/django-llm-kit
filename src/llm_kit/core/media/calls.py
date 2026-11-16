@@ -82,12 +82,17 @@ def _running():
     return running_config()
 
 
+def _setting(name: str, default: float) -> float:
+    value = config.get(name)
+    return float(default if value is None else value)
+
+
 def _poll_every() -> float:
-    return float(config.get("MEDIA_POLL_EVERY") or 5)
+    return _setting("MEDIA_POLL_EVERY", 5)
 
 
 def _wait_for(wait: float | None) -> float:
-    return float(wait if wait is not None else (config.get("MEDIA_JOB_WAIT") or 900))
+    return float(wait) if wait is not None else _setting("MEDIA_JOB_WAIT", 900)
 
 
 def _usable(ref: str, result: Any) -> MediaResult:
@@ -223,6 +228,21 @@ async def run_async(
                 continue
             return _end(call, rec, t0, request, ref, result=result)
     raise _failure(call, errors)
+
+
+def fetched(result: MediaResult) -> MediaResult:
+    """Download media the provider gave as URLs (they often expire within the hour)."""
+    for media in result.media:
+        if media.url is not None and media.data is None:
+            media.read()
+    return result
+
+
+async def afetched(result: MediaResult) -> MediaResult:
+    for media in result.media:
+        if media.url is not None and media.data is None:
+            await media.aread()
+    return result
 
 
 # ------------------------------------------------------------------ recording
