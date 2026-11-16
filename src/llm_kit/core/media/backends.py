@@ -137,6 +137,21 @@ class LiteLLMMedia:
     async def agenerate(self, kind: str, request: dict[str, Any], **params: Any) -> MediaResult:
         return await self._op(kind, "_a")(request, self._kwargs(params))
 
+    # images
+
+    def _image(self, request, kwargs):
+        return images_result("image", _litellm().image_generation(**_image_args(self, request, kwargs)))
+
+    async def _aimage(self, request, kwargs):
+        return images_result("image", await _litellm().aimage_generation(**_image_args(self, request, kwargs)))
+
+    def _image_edit(self, request, kwargs):
+        return images_result("image_edit", _litellm().image_edit(**_edit_args(self, request, kwargs)))
+
+    async def _aimage_edit(self, request, kwargs):
+        args = await asyncio.to_thread(_edit_args, self, request, kwargs)  # reading the images may fetch them
+        return images_result("image_edit", await _litellm().aimage_edit(**args))
+
 
 _factories: dict[str, MediaFactory] = {}
 _lock = threading.Lock()
@@ -158,3 +173,68 @@ def get_media_factory(name: str | MediaFactory | None) -> MediaFactory:
                 raise ConfigError(f"Media backend {name!r} is not callable.")
             _factories[name] = factory
     return _factories[name]
+
+
+# ------------------------------------------------------------------ LiteLLM: images
+
+
+def _usage_numbers(usage: Any) -> tuple[int | None, int | None, dict[str, Any]]:
+    """(text tokens in, tokens out, image-token units) from an image response's usage."""
+    if usage is None:
+        return None, None, {}
+    tokens_in, tokens_out = get(usage, "input_tokens"), get(usage, "output_tokens")
+    details = get(usage, "input_tokens_details") or {}
+    image_in, text_in = get(details, "image_tokens"), get(details, "text_tokens")
+    units = {}
+    if image_in:
+        units["input_image_tokens"] = image_in
+    if tokens_out:
+        units["output_image_tokens"] = tokens_out
+    return (text_in if text_in is not None else tokens_in), None, units
+
+
+def images_result(kind: str, response: Any) -> MediaResult:
+    """A LiteLLM ``ImageResponse`` as a ``MediaResult``: base64 images decoded, URLs kept to fetch."""
+    import base64
+
+    from llm_kit.core.media.types import Media, sniff
+
+    fmt = get(response, "output_format")
+    mime = f"image/{'jpeg' if fmt == 'jpg' else fmt}" if fmt else ""
+    media = []
+    for item in get(response, "data") or []:
+        meta = {}
+        if revised := get(item, "revised_prompt"):
+            meta["revised_prompt"] = revised
+        if b64 := get(item, "b64_json"):
+            data = base64.b64decode(b64)
+            media.append(Media(data=data, mime_type=sniff(data) or mime, meta=meta))
+        elif url := get(item, "url"):
+            media.append(Media(url=url, mime_type=mime, meta=meta))
+    text_in, _, units = _usage_numbers(get(response, "usage"))
+    data = {k: v for k in ("size", "quality", "background") if (v := get(response, k))}
+    revised = [m.meta["revised_prompt"] for m in media if "revised_prompt" in m.meta]
+    if revised:
+        data["revised_prompt"] = revised[0]
+    return MediaResult(kind, media=media, data=data, units=units, cost=reported_cost(response), input_tokens=text_in)
+
+
+def _clean(request: dict[str, Any], *names: str) -> dict[str, Any]:
+    return {n: request[n] for n in names if request.get(n) is not None}
+
+
+def _image_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "model": self.ref,
+        "prompt": request["prompt"],
+        **_clean(request, "n", "size", "quality", "style"),
+        **kwargs,
+    }
+
+
+def _edit_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
+    images = [m.as_file() for m in request["images"]]
+    args = {"model": self.ref, "prompt": request["prompt"], "image": images if len(images) > 1 else images[0]}
+    if request.get("mask") is not None:
+        args["mask"] = request["mask"].as_file()
+    return {**args, **_clean(request, "n", "size", "quality"), **kwargs}
