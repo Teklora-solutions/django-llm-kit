@@ -13,7 +13,7 @@ class LLMCall(models.Model):
     call_id = models.UUIDField(unique=True)
     run_id = models.UUIDField(null=True, blank=True, db_index=True)
     started_at = models.DateTimeField(db_index=True)
-    kind = models.CharField(max_length=20, default="chat", db_index=True)  # chat | embedding
+    kind = models.CharField(max_length=20, default="chat", db_index=True)  # chat | embedding | a media kind
     key_owner = models.CharField(max_length=10, blank=True, help_text="Whose key: platform, tenant or user.")
     touchpoint = models.CharField(max_length=200, blank=True)
     agent = models.CharField(max_length=200, blank=True)
@@ -35,6 +35,7 @@ class LLMCall(models.Model):
     cache_read_tokens = models.PositiveIntegerField(default=0)
     cache_write_tokens = models.PositiveIntegerField(default=0)
     reasoning_tokens = models.PositiveIntegerField(default=0)
+    units = models.JSONField(default=dict, blank=True, help_text="What a media call made or read: images, seconds...")
     usage_estimated = models.BooleanField(default=False)
     cost = models.DecimalField(max_digits=20, decimal_places=10, null=True, blank=True)
     unpriced = models.BooleanField(default=False)

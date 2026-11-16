@@ -19,7 +19,7 @@ from collections.abc import Callable
 from decimal import Decimal
 from typing import Any, Protocol
 
-from llm_kit.core.observability.cost import PriceLookup, price_call
+from llm_kit.core.observability.cost import PriceLookup, price_call, price_media
 from llm_kit.core.observability.records import CallRecord, RunRecord, ToolRecord
 
 logger = logging.getLogger("llm_kit.observability")
@@ -146,7 +146,9 @@ class Recorder:
                 logger.exception("llm-kit sink %s failed; %s records lost", type(sink).__name__, len(batch))
 
     def _price(self, call: CallRecord) -> None:
-        if call.status == "ok" and self.price_lookup is not None:
+        if call.status == "ok" and call.cost is not None:  # priced already (a media call's backend said)
+            call.unpriced = False
+        elif call.status == "ok" and self.price_lookup is not None:
             try:
                 prices = self.price_lookup(call.model or call.served_model)
             except Exception as e:
@@ -159,14 +161,19 @@ class Recorder:
                 elif seen in (10, 100) or seen % 1000 == 0:
                     logger.warning("llm-kit price lookup has failed %s times: %s", seen, key)
                 prices = None
-            call.cost = price_call(
-                prices,
-                input_tokens=call.input_tokens,
-                output_tokens=call.output_tokens,
-                cache_read_tokens=call.cache_read_tokens,
-                cache_write_tokens=call.cache_write_tokens,
-                reasoning_tokens=call.reasoning_tokens,
-            )
+            if call.units:
+                call.cost = price_media(
+                    prices, call.units, input_tokens=call.input_tokens, output_tokens=call.output_tokens
+                )
+            else:
+                call.cost = price_call(
+                    prices,
+                    input_tokens=call.input_tokens,
+                    output_tokens=call.output_tokens,
+                    cache_read_tokens=call.cache_read_tokens,
+                    cache_write_tokens=call.cache_write_tokens,
+                    reasoning_tokens=call.reasoning_tokens,
+                )
             call.unpriced = call.cost is None
         if call.run_id:
             if len(self._run_costs) > 10_000:  # roots that never produce a run record (e.g. a bare tool)

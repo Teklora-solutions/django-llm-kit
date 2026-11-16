@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from llm_kit.core.catalogue.fields import Key, clean, normalise_provider, per_mtok
+from llm_kit.core.catalogue.fields import Key, clean, is_media_price, normalise_provider, per_mtok
 
 
 @dataclass
@@ -37,6 +37,19 @@ class Source:
 
 def _md_date(value: Any) -> str | None:
     return str(value) if value else None
+
+
+_MEDIA_OUTPUT = {"image": "image", "video": "video", "audio": "speech"}
+
+
+def _md_kind(m: dict, output: list) -> str:
+    if m.get("type") == "embedding" or "embedding" in output:
+        return "embedding"
+    if output and "text" not in output:  # makes media only: an image, video or speech model
+        for modality, kind in _MEDIA_OUTPUT.items():
+            if modality in output:
+                return kind
+    return "chat"
 
 
 def parse_models_dev(data: dict) -> ParseResult:
@@ -70,7 +83,7 @@ def parse_models_dev(data: dict) -> ParseResult:
                         }
                     )
             output = modalities.get("output") or []
-            kind = "embedding" if m.get("type") == "embedding" or "embedding" in output else "chat"
+            kind = _md_kind(m, output)
             out.add(
                 (provider, model_id),
                 {
@@ -164,12 +177,26 @@ _LITELLM_KIND = {
     "completion": "chat",
     "embedding": "embedding",
     "image_generation": "image",
-    "image_edit": "image",
-    "audio_transcription": "audio",
-    "audio_speech": "audio",
-    "realtime": "audio",
+    "image_edit": "image_edit",
+    "video_generation": "video",
+    "audio_transcription": "transcription",
+    "audio_speech": "speech",
+    "realtime": "realtime",
+    "ocr": "ocr",
     "rerank": "rerank",
+    "moderation": "moderation",
 }
+
+
+def _unit_prices(m: dict) -> dict[str, str] | None:
+    """Media prices by unit (per image, second, pixel, character, ...), USD per unit."""
+    out = {}
+    for key, value in m.items():
+        if is_media_price(key):
+            price = per_mtok(value, per_token=False)
+            if price is not None:
+                out[key] = price
+    return out or None
 
 
 def parse_litellm(data: dict) -> ParseResult:
@@ -213,6 +240,7 @@ def parse_litellm(data: dict) -> ParseResult:
                 "price_cache_read": per_mtok(m.get("cache_read_input_token_cost"), per_token=True),
                 "price_cache_write": per_mtok(m.get("cache_creation_input_token_cost"), per_token=True),
                 "price_reasoning": per_mtok(m.get("output_cost_per_reasoning_token"), per_token=True),
+                "price_units": _unit_prices(m) if kind not in ("chat", "embedding") else None,
                 "deprecation_date": m.get("deprecation_date"),
             },
         )

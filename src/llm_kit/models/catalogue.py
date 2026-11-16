@@ -16,7 +16,11 @@ class CatalogueModel(models.Model):
     model_id = models.CharField(max_length=255)
     name = models.CharField(max_length=255, blank=True)
     family = models.CharField(max_length=100, blank=True)
-    kind = models.CharField(max_length=20, blank=True, help_text="chat, embedding, image, audio, rerank, other")
+    kind = models.CharField(
+        max_length=20,
+        blank=True,
+        help_text="What it does: chat, embedding, image, image_edit, video, speech, transcription, ocr, ...",
+    )
     canonical_id = models.CharField(max_length=255, blank=True)
     # Comma-delimited with leading/trailing commas (",text,image,") so filters
     # like `input_modalities__contains=",image,"` work on every database.

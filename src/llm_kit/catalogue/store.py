@@ -17,7 +17,7 @@ from llm_kit.models import (
     CatalogueSource,
 )
 
-_COLUMN_FIELDS = [f for f in FIELDS if f not in ("input_modalities", "output_modalities")]
+_COLUMN_FIELDS = [f for f in FIELDS if f not in ("input_modalities", "output_modalities", "price_units")]
 
 
 def _modalities(value) -> str:

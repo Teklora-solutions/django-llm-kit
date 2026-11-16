@@ -136,6 +136,20 @@ DEFAULTS: dict[str, Any] = {
     "RUN_EVENT_LOG_SIZE": 2000,
     "RUN_EVENT_LOG_TTL": 300,
     "RUN_LOST_AFTER": 60,
+    # Generated media (tp.image(), video(), speak(), transcribe(), ocr(), generate()): the backend
+    # ("auto"/"litellm", or "pkg.mod:factory"), how often a long job (video) is checked and how
+    # long a call waits for one, where save() puts files (a STORAGES alias and a path prefix), the
+    # most bytes the kit will load or save for one piece of media (0: no limit), how long a
+    # download may take, and whether URLs on private addresses may be fetched (off: a URL a user
+    # gave must not reach your own network).
+    "MEDIA_BACKEND": "auto",
+    "MEDIA_POLL_EVERY": 5,
+    "MEDIA_JOB_WAIT": 900,
+    "MEDIA_STORAGE": "default",
+    "MEDIA_PATH": "llm_kit/media/",
+    "MEDIA_MAX_BYTES": 1 << 30,
+    "MEDIA_FETCH_TIMEOUT": 120,
+    "MEDIA_FETCH_PRIVATE": False,
 }
 
 _source: Callable[[], Mapping[str, Any]] = dict

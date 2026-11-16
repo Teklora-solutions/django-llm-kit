@@ -320,7 +320,7 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
         for owner, keys in key_sets(env, ref, tp):  # BYOK: the caller's keys, then the platform's
             refs.append(ref)
             owners.append(owner)
-            embedders.append(as_embedder(factory(ref, dict(merged), keys), backend))
+            embedders.append(as_embedder(factory(ref, _params_for(tp, ref, merged), keys), backend))
     if not embedders:
         from llm_kit.core.touchpoints.backends import no_key
 
@@ -330,6 +330,11 @@ def prepare(tp, inputs, *, requested, config_, env, retry, fallbacks, params) ->
     limiter_for = getattr(env, "rate_limiter", None)
     call.limiter = limiter_for() if callable(limiter_for) else None
     return call, _inputs(inputs)
+
+
+def _params_for(tp, ref: str, params: dict[str, Any]) -> dict[str, Any]:
+    params_for = getattr(tp, "params_for", None)
+    return params_for(ref, params) if params_for is not None else dict(params)
 
 
 def _running():

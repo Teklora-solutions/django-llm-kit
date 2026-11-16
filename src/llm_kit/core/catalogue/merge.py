@@ -11,6 +11,7 @@ from llm_kit.core.catalogue.fields import (
     CONFLICT_FIELDS,
     CONFLICT_TOLERANCE,
     DEFAULT_PRECEDENCE,
+    FIELD_PRECEDENCE,
     FIELDS,
     PRICE_FIELDS,
     PRICE_PRECEDENCE,
@@ -39,6 +40,13 @@ def _differs(a: Any, b: Any) -> bool:
         return False
     base = max(abs(da), abs(db))
     return base != 0 and abs(da - db) / base > CONFLICT_TOLERANCE
+
+
+def _promoted(order: tuple[str, ...], provider: str | None) -> tuple[str, ...]:
+    own = AUTHORITATIVE_SOURCES.get(provider or "", ())
+    if not own:
+        return order
+    return ("override", *own, *(s for s in order if s != "override" and s not in own))
 
 
 def merge(
@@ -73,8 +81,12 @@ def merge(
 
     price_order = _order(sources, price_precedence)
     default_order = _order(sources, default_precedence)
+    own_orders = {f: _order(sources, _promoted(order, provider)) for f, order in FIELD_PRECEDENCE.items()}
     for f in FIELDS:
-        order = price_order if f in PRICE_FIELDS else default_order
+        if f in own_orders:
+            order = own_orders[f]
+        else:
+            order = price_order if f in PRICE_FIELDS or f == "price_units" else default_order
         for src in order:
             v = sources[src].get(f)
             if v is not None:
