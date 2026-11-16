@@ -18,7 +18,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      placeholder: django-llm-kit 0.2.0, Django 5.2, Python 3.12, langgraph 1.x, database
+      placeholder: django-llm-kit 0.3.0, Django 5.2, Python 3.12, langgraph 1.x, database
     validations:
       required: true
   - type: textarea

@@ -4,6 +4,8 @@ All notable changes to this project are listed here. The format follows [Keep a 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-17
+
 ### Added
 
 - Generated media through touchpoints (#48): `tp.generate(kind, **request)` / `agenerate` make images, video, speech, transcripts, document text, and kinds you register (`register_kind(MediaKind(...))`). They get the same keys, rate limits, retry waits, fallbacks, records and budgets as chat and embeddings ([guide](docs/guides/media.md)).
