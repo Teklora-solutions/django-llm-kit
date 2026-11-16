@@ -97,11 +97,18 @@ def test_litellm_video_is_submitted_polled_and_downloaded(litellm):
     result = video_tp(fallbacks=[]).video("waves", image=PNG, seconds=8, size="1280x720", env=env())
     sent = litellm["generate"]
     assert sent["model"] == "openai/sora-2" and sent["prompt"] == "waves" and sent["seconds"] == "8"
-    assert sent["input_reference"] == ("file.png", PNG, "image/png") and sent["api_key"] == "o"
+    assert sent["input_reference"].read() == PNG and sent["api_key"] == "o"
     assert [s["video_id"] for s in litellm["status"]] == ["video_abc"] * 3
     assert litellm["status"][0] == {"video_id": "video_abc", "api_key": "o"}  # no generation params
     assert result.job_id == "video_abc" and result.first.read() == MP4 and result.first.mime_type == "video/mp4"
     assert result.units == {"videos": 1, "output_seconds": 8.0, "resolution": "720p", "size": "1280x720"}
+
+
+def test_status_checks_reach_the_same_endpoint(litellm):
+    point = video_tp(fallbacks=[], params={"api_base": "https://proxy.example/v1", "size": "1280x720"})
+    point.video("waves", env=env())
+    assert litellm["status"][0] == {"video_id": "video_abc", "api_base": "https://proxy.example/v1", "api_key": "o"}
+    assert litellm["content"] == {"video_id": "video_abc", "api_base": "https://proxy.example/v1", "api_key": "o"}
 
 
 def test_litellm_video_async(litellm):

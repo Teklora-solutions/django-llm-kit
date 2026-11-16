@@ -37,6 +37,25 @@ MediaFactory = Callable[[str, dict[str, Any], list[str]], Any]
 
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
+# Parameters that say where and how to reach a provider, kept for status checks and downloads.
+CONNECTION_PARAMS = (
+    "api_base",
+    "base_url",
+    "api_version",
+    "organization",
+    "project",
+    "custom_llm_provider",
+    "extra_headers",
+    "timeout",
+    "vertex_project",
+    "vertex_location",
+    "vertex_credentials",
+    "aws_region_name",
+    "aws_access_key_id",
+    "aws_secret_access_key",
+    "aws_session_token",
+)
+
 
 @dataclass
 class JobState:
@@ -140,7 +159,9 @@ class LiteLLMMedia:
     # long jobs: _submit_<kind>, _poll_<kind> and their async forms
 
     def _key(self) -> dict[str, Any]:
-        return {"api_key": random.choice(self.keys)} if self.keys else {}
+        """What a status check needs: the key and where the provider is (not generation params)."""
+        where = {k: v for k, v in self.params.items() if k in CONNECTION_PARAMS}
+        return {**where, "api_key": random.choice(self.keys)} if self.keys else where
 
     def submit(self, kind: str, request: dict[str, Any], **params: Any) -> str:
         return self._op(kind, "_submit_")(request, self._kwargs(params))
@@ -410,7 +431,7 @@ _VIDEO_STATUS = {"queued": PENDING, "pending": PENDING, "in_progress": RUNNING, 
 def _video_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, Any]) -> dict[str, Any]:
     args = {"model": self.ref, "prompt": request["prompt"], **kwargs}
     if request.get("image") is not None:
-        args["input_reference"] = request["image"].upload()
+        args["input_reference"] = request["image"].as_file()
     if request.get("seconds") is not None:
         args["seconds"] = str(request["seconds"])
     if request.get("size") is not None:
