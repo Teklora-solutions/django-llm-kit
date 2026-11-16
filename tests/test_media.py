@@ -188,8 +188,9 @@ def test_a_model_without_a_key_is_skipped():
 def test_unknown_kinds_and_backends():
     with pytest.raises(ConfigError, match="Unknown media kind"):
         tp().generate("hologram", prompt="x", env=env())
+    register_kind(MediaKind("hologram_test"))
     with pytest.raises(ConfigError, match="doesn't make"):
-        tp(media_backend="litellm").generate("ocr", document=Media(data=b"%PDF"), env=env(), fallbacks=False)
+        tp(media_backend="litellm").generate("hologram_test", prompt="x", env=env(), fallbacks=False)
 
 
 def test_an_empty_answer_is_a_failure_that_falls_back(monkeypatch):

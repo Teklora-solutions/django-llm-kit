@@ -64,9 +64,9 @@ KINDS = (
 
 def is_media_price(key: str) -> bool:
     """A LiteLLM price key (``output_cost_per_image``, ``input_cost_per_second``,
-    ``output_cost_per_second_720p``, ...) that prices media by a unit other than plain text tokens.
-    Kept as given, in USD per unit, under ``price_units``."""
-    if "_cost_per_" not in key or not key.startswith(("input_", "output_")):
+    ``output_cost_per_second_720p``, ``ocr_cost_per_page``, ...) that prices media by a unit other
+    than plain text tokens. Kept as given, in USD per unit, under ``price_units``."""
+    if "_cost_per_" not in key or not key.startswith(("input_", "output_", "ocr_", "annotation_")):
         return False
     if any(word in key for word in ("_batches", "_priority", "_flex", "_above_", "dbu", "reasoning")):
         return False

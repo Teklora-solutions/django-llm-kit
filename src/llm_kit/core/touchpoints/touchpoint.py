@@ -545,6 +545,43 @@ class Touchpoint:
         options = _options(requested, config, env, retry, fallbacks, caller)
         return await self._arun_media("transcription", request, options, params)
 
+    def ocr(
+        self,
+        document: Any,
+        *,
+        pages: Any = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        """Read the text of ``document`` (a PDF or an image: bytes, a URL, a file or ``Media``): a
+        ``MediaResult`` whose ``text`` is the whole document in Markdown and ``pages`` each page's
+        (``{"index", "markdown"}``). ``pages`` picks pages (``[0, 2]``) on models that take it."""
+        request = {"document": _one_media(document), "pages": pages}
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return self._run_media("ocr", request, options, params)
+
+    async def aocr(
+        self,
+        document: Any,
+        *,
+        pages: Any = None,
+        requested: str | None = None,
+        config: RunnableConfig | None = None,
+        env: ResolutionEnv | None = None,
+        retry: RetryPolicy | dict | str | None = None,
+        fallbacks: bool = True,
+        caller: Any = None,
+        **params: Any,
+    ) -> Any:
+        request = {"document": _one_media(document), "pages": pages}
+        options = _options(requested, config, env, retry, fallbacks, caller)
+        return await self._arun_media("ocr", request, options, params)
+
     def video(
         self,
         prompt: str,
@@ -702,6 +739,12 @@ def _media_list(value: Any) -> list:
     if isinstance(value, (list, tuple)):
         return [Media.of(v) for v in value]
     return [Media.of(value)]
+
+
+def _one_media(value: Any) -> Any:
+    from llm_kit.core.media.types import Media
+
+    return Media.of(value)
 
 
 def _edit_request(prompt, images, mask, n, size, quality) -> dict[str, Any]:

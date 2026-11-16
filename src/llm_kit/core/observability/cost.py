@@ -77,6 +77,7 @@ UNITS = (
     "characters",  # text read aloud
     "videos",  # clips made
     "pages",  # pages read (OCR)
+    "annotated_pages",  # pages given structured annotations (OCR)
     "input_image_tokens",
     "output_image_tokens",
     "input_audio_tokens",
@@ -150,7 +151,8 @@ def price_media(
             add(per["output_cost_per_pixel"], _pixels(units.get("size")) * int(images))
     add(per.get("input_cost_per_image"), units.get("input_images"))
     add(first("output_cost_per_video", "output_cost_per_video_clip"), units.get("videos"))
-    add(first("input_cost_per_page", "output_cost_per_page"), units.get("pages"))
+    add(first("ocr_cost_per_page", "input_cost_per_page", "output_cost_per_page"), units.get("pages"))
+    add(per.get("annotation_cost_per_page"), units.get("annotated_pages"))
     for direction in ("input", "output"):
         for medium in ("image", "audio"):
             add(per.get(f"{direction}_cost_per_{medium}_token"), units.get(f"{direction}_{medium}_tokens"))
