@@ -60,7 +60,13 @@ def media_webhooks_can_arrive(app_configs=None, **kwargs):
     """Webhooks for media jobs need a secret (or your own check) and, where the job tells the
     provider where to call, the URL to give it."""
     from llm_kit import conf
+    from llm_kit.core.media.backends import get_media_factory
     from llm_kit.media.webhooks import config_for
+
+    try:
+        cannot_send = getattr(get_media_factory(None), "cannot_send_webhook_url", None) or ()
+    except Exception:  # a backend that doesn't import is reported elsewhere
+        cannot_send = ()
 
     messages = []
     for provider in conf.get("MEDIA_WEBHOOKS") or {}:
@@ -78,9 +84,20 @@ def media_webhooks_can_arrive(app_configs=None, **kwargs):
             messages.append(
                 checks.Warning(
                     f"MEDIA_WEBHOOKS[{provider!r}] gives jobs a webhook URL, but MEDIA_WEBHOOK_URL is not set: "
-                    "its jobs fall back to checking every MEDIA_WEBHOOK_POLL_EVERY seconds.",
+                    "no webhook can come, so its jobs keep checking every MEDIA_POLL_EVERY seconds.",
                     hint='Set MEDIA_WEBHOOK_URL = "https://<your site>/llm/media/webhooks/{provider}/".',
                     id="llm_kit.W004",
+                )
+            )
+        if config.get("param") and provider in cannot_send:
+            messages.append(
+                checks.Warning(
+                    f"MEDIA_WEBHOOKS[{provider!r}] gives jobs a webhook URL, but the media backend can't send "
+                    f"it to {provider}: no webhook can come, so its jobs keep checking every MEDIA_POLL_EVERY "
+                    "seconds.",
+                    hint="Use a media backend of your own for this provider that sends the URL "
+                    "(see the media guide, Webhooks).",
+                    id="llm_kit.W005",
                 )
             )
     return messages

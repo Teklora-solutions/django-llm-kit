@@ -111,12 +111,19 @@ def test_status_checks_reach_the_same_endpoint(litellm):
     assert litellm["content"] == {"video_id": "video_abc", "api_base": "https://proxy.example/v1", "api_key": "o"}
 
 
-def test_fal_takes_the_image_as_a_url(litellm):
+def test_fal_takes_the_image_as_a_url_or_a_data_uri(litellm):
     point = video_tp(default="fal_ai/fal-ai/kling-video/v2/master/image-to-video", fallbacks=[])
     point.video("waves", image="https://cdn.example/frame.png", env=env(keys={"fal_ai": ["f"]}))
     assert litellm["generate"]["input_reference"] == "https://cdn.example/frame.png"
-    with pytest.raises(BadRequest, match="public URL"):
-        point.video("waves", image=PNG, env=env(keys={"fal_ai": ["f"]}))
+    as_data = media_backends._reference("fal_ai/fal-ai/kling-video", Media.of(PNG))  # bytes, files, data: URIs
+    assert as_data == "data:image/png;base64," + base64.b64encode(PNG).decode()
+
+
+def test_fal_behind_a_proxy_prefix_is_recognised():
+    assert media_backends.takes_url_references("fal_ai/fal-ai/kling-video/v2/master/image-to-video")
+    assert media_backends.takes_url_references("litellm_proxy/fal_ai/fal-ai/kling-video")
+    assert not media_backends.takes_url_references("openai/sora-2")
+    assert not media_backends.takes_url_references("litellm_proxy/sora-2")
 
 
 def test_litellm_video_async(litellm):
@@ -334,8 +341,93 @@ def test_fal_signatures(rf):
     assert not webhooks.verified(tampered, config)
 
 
-def test_fal_public_keys_come_from_fals_published_address():
-    assert webhooks.FAL_KEYS_URL == "https://rest.fal.ai/.well-known/jwks.json"
+def _fal_signed(rf, key, body=b'{"request_id": "r1"}'):
+    stamp = str(int(time.time()))
+    message = "\n".join(["r1", "u1", stamp, hashlib.sha256(body).hexdigest()]).encode()
+    headers = {
+        "HTTP_X_FAL_WEBHOOK_REQUEST_ID": "r1",
+        "HTTP_X_FAL_WEBHOOK_USER_ID": "u1",
+        "HTTP_X_FAL_WEBHOOK_TIMESTAMP": stamp,
+        "HTTP_X_FAL_WEBHOOK_SIGNATURE": key.sign(message).hex(),
+    }
+    return rf.post("/", body, content_type="application/json", **headers)
+
+
+@pytest.fixture
+def fal_keys(monkeypatch):
+    """fal's key address, served from here: ``published`` is what it lists, ``fetched`` each URL asked."""
+    pytest.importorskip("cryptography")
+    import httpx
+
+    state = {"published": [], "fetched": [], "fail": False}
+
+    def get(url, timeout=None):
+        state["fetched"].append(url)
+        if state["fail"]:
+            raise httpx.ConnectError("fal is down")
+        keys = [
+            {"kty": "OKP", "crv": "Ed25519", "x": base64.urlsafe_b64encode(k).decode().rstrip("=")}
+            for k in state["published"]
+        ]
+        return httpx.Response(200, json={"keys": keys}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+    monkeypatch.setattr(webhooks, "_fal", {"keys": [], "fetched": None, "tried": None})
+    return state
+
+
+def _ed25519():
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    key = Ed25519PrivateKey.generate()
+    return key, key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
+
+
+def test_fal_keys_are_fetched_from_fals_published_address_and_cached(rf, fal_keys):
+    key, public = _ed25519()
+    fal_keys["published"] = [public]
+    config = webhooks.DEFAULTS["fal_ai"]
+    assert webhooks.verified(_fal_signed(rf, key), config)
+    assert webhooks.verified(_fal_signed(rf, key), config)
+    assert fal_keys["fetched"] == ["https://rest.fal.ai/.well-known/jwks.json"]  # once
+
+
+def test_fal_keys_are_fetched_again_when_a_signature_matches_none(rf, fal_keys, monkeypatch):
+    old, old_public = _ed25519()
+    new, new_public = _ed25519()
+    fal_keys["published"] = [old_public]
+    config = webhooks.DEFAULTS["fal_ai"]
+    assert webhooks.verified(_fal_signed(rf, old), config)
+    fal_keys["published"] = [new_public]  # fal rotated its keys
+    monkeypatch.setattr(webhooks, "REFETCH_EVERY", 0)
+    assert webhooks.verified(_fal_signed(rf, new), config)
+    assert len(fal_keys["fetched"]) == 2
+
+
+def test_fal_key_fetches_are_limited_failures_included(rf, fal_keys):
+    key, public = _ed25519()
+    fal_keys["fail"] = True
+    config = webhooks.DEFAULTS["fal_ai"]
+    for _ in range(3):
+        assert not webhooks.verified(_fal_signed(rf, key), config)
+    assert len(fal_keys["fetched"]) == 1  # tried once, not on every webhook
+    _, stranger = _ed25519()
+    fal_keys.update(fail=False, published=[public])
+    webhooks._fal.update(keys=[stranger], fetched=time.monotonic(), tried=time.monotonic())
+    assert not webhooks.verified(_fal_signed(rf, key), config)  # unknown signer, refetched lately
+    assert len(fal_keys["fetched"]) == 1
+
+
+def test_fal_key_fetches_never_wait_on_each_other(rf, fal_keys):
+    key, public = _ed25519()
+    fal_keys["published"] = [public]
+    webhooks._fal_fetching.acquire()  # another request is fetching
+    try:
+        assert not webhooks.verified(_fal_signed(rf, key), webhooks.DEFAULTS["fal_ai"])
+    finally:
+        webhooks._fal_fetching.release()
+    assert fal_keys["fetched"] == []
 
 
 def test_the_webhook_url_goes_with_the_job_when_the_provider_takes_one(settings):
@@ -349,6 +441,46 @@ def test_the_webhook_url_goes_with_the_job_when_the_provider_takes_one(settings)
     }
     assert webhooks.submit_params("openai/sora-2") == {}  # set in OpenAI's dashboard
     assert webhooks.submit_params("gemini/veo-3") == {}  # webhooks off
+    litellm = media_backends.LiteLLMMedia("replicate/minimax/video-01", {}, [])
+    assert webhooks.submit_params("replicate/minimax/video-01", litellm) == {}  # LiteLLM can't send it
+
+
+def test_jobs_check_rarely_only_while_a_webhook_can_come(settings):
+    settings.LLM_KIT = {
+        **settings.LLM_KIT,
+        "MEDIA_WEBHOOKS": {"fal_ai": {"param": "webhook_url"}, "openai": {"secret": SECRET}},
+    }
+    fal, litellm = "fal_ai/fal-ai/kling-video", media_backends.LiteLLMMedia("fal_ai/x", {}, [])
+    own = types.SimpleNamespace()  # a backend of your own that sends the URL
+    assert webhooks.expected("openai/sora-2", litellm)  # the URL is in OpenAI's dashboard
+    assert not webhooks.expected("gemini/veo-3", litellm)  # webhooks off
+    assert not webhooks.expected(fal, own)  # no MEDIA_WEBHOOK_URL to send
+    settings.LLM_KIT = {**settings.LLM_KIT, "MEDIA_WEBHOOK_URL": "https://app.example/llm/media/webhooks/{provider}/"}
+    assert webhooks.expected(fal, own)
+    assert not webhooks.expected(fal, litellm)  # LiteLLM can't send fal the URL
+
+
+def test_a_job_whose_webhook_cannot_come_keeps_checking_often(settings, monkeypatch):
+    settings.LLM_KIT = {
+        **settings.LLM_KIT,
+        "MEDIA_WEBHOOKS": {"fal_ai": {"param": "webhook_url"}},
+        "MEDIA_WEBHOOK_URL": "https://app.example/llm/media/webhooks/{provider}/",
+        "MEDIA_WEBHOOK_POLL_EVERY": 60,
+    }
+    waited = []
+
+    async def wait_for(awaitable, timeout):
+        waited.append(timeout)
+        awaitable.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(jobs.asyncio, "wait_for", wait_for)
+    watcher = jobs._Watcher(types.SimpleNamespace(run_id="r-pause", payload={}))
+    watcher.backend = media_backends.LiteLLMMedia("fal_ai/x", {}, [])
+    asyncio.run(watcher.pause("fal_ai/fal-ai/kling-video", 0.5))
+    watcher.backend = types.SimpleNamespace()
+    asyncio.run(watcher.pause("fal_ai/fal-ai/kling-video", 0.5))
+    assert waited == [0.5, 60.0]
 
 
 def test_webhook_settings_that_cannot_work_are_reported(settings):
@@ -361,5 +493,8 @@ def test_webhook_settings_that_cannot_work_are_reported(settings):
         **settings.LLM_KIT,
         "MEDIA_WEBHOOKS": {"replicate": {"secret": SECRET, "param": "webhook"}},
         "MEDIA_WEBHOOK_URL": "https://app.example/llm/media/webhooks/{provider}/",
+        "MEDIA_BACKEND": "litellm",
     }
+    assert [m.id for m in check()] == ["llm_kit.W005"]  # LiteLLM can't send Replicate the URL
+    settings.LLM_KIT = {**settings.LLM_KIT, "MEDIA_BACKEND": "tests.test_media:backend"}
     assert check() == []

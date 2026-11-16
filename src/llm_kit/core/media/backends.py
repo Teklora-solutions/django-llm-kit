@@ -136,6 +136,11 @@ def reported_cost(response: Any) -> Any:
 class LiteLLMMedia:
     """Media through LiteLLM. Each kind is a pair of methods, ``_<kind>`` and ``_a<kind>``."""
 
+    # Providers whose jobs LiteLLM (1.106) can't give a webhook URL: fal wants a ``fal_webhook``
+    # query parameter that LiteLLM's video calls don't send, and LiteLLM has no Replicate video.
+    # A backend of your own that can sends it (see ``llm_kit.media.webhooks``).
+    cannot_send_webhook_url = ("fal_ai", "replicate")
+
     def __init__(self, ref: str, params: dict[str, Any], keys: list[str]) -> None:
         self.ref, self.params, self.keys = ref, dict(params), list(keys)
 
@@ -449,18 +454,23 @@ def _video_args(self: LiteLLMMedia, request: dict[str, Any], kwargs: dict[str, A
     return args
 
 
-# Providers whose video APIs take the reference image as a public URL, not an upload.
+# Providers whose video APIs take the reference image as a string (a URL or a data: URI), not an
+# upload.
 URL_REFERENCES = ("fal_ai",)
 
 
-def _reference(ref: str, image: Any) -> Any:
-    from llm_kit.core.errors import BadRequest
-    from llm_kit.core.touchpoints.env import provider_of
+def takes_url_references(ref: str) -> bool:
+    """Whether ``ref``'s video API wants the image as a string: its provider, or the provider
+    behind a proxy prefix (``litellm_proxy/fal_ai/...``), is in ``URL_REFERENCES``."""
+    from llm_kit.core.catalogue.fields import normalise_provider
 
-    if provider_of(ref) in URL_REFERENCES:
-        if image.url is None:
-            raise BadRequest(f"{ref} takes the image as a public URL: pass image='https://...'.")
-        return image.url
+    parts = ref.split("/")[:-1][:2]
+    return any(normalise_provider(part) in URL_REFERENCES for part in parts)
+
+
+def _reference(ref: str, image: Any) -> Any:
+    if takes_url_references(ref):
+        return image.url or image.data_uri()
     return image.as_file()
 
 

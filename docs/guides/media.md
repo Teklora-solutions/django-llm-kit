@@ -204,7 +204,7 @@ LLM_KIT = {
     "MEDIA_WEBHOOKS": {
         "replicate": {"secret": "whsec_...", "param": "webhook"},
         "openai": {"secret": "whsec_..."},          # the URL is set in OpenAI's dashboard
-        "fal_ai": {"param": "webhook_url"},         # with a backend of your own: see below
+        "fal_ai": {"param": "webhook_url"},         # only with a backend of your own: see below
         "acme": {"verify": "hmac", "header": "X-Acme-Signature", "secret": "...", "id": "job.id"},
         "other": {"verify": "myapp.hooks:verify", "id": "data.job_id"},
     },
@@ -226,26 +226,27 @@ Which providers can send them:
 | Provider | How |
 |---|---|
 | **OpenAI** (Sora) | Set the URL in OpenAI's dashboard, and add `{"secret": ...}`. The video id is in `data.id`. Works with the LiteLLM backend. |
-| **fal** | Each job names its URL in a `fal_webhook` query parameter. LiteLLM's video calls (1.106) don't send query parameters, so use a [backend of your own](#your-own-backend) for fal video that submits with `fal_client.submit(..., webhook_url=params["webhook_url"])`, and set `"param": "webhook_url"`. |
+| **fal** | Each job names its URL in a `fal_webhook` query parameter. LiteLLM's video calls (1.106) don't send query parameters, so use a [backend of your own](#your-own-backend) for fal video that submits with `fal_client.submit(..., webhook_url=params["webhook_url"])`, and set `"param": "webhook_url"`. With the LiteLLM backend the URL isn't sent: jobs keep checking every `MEDIA_POLL_EVERY` seconds and `llm_kit.W005` says so. |
 | **Replicate** | LiteLLM has no Replicate video. A backend of your own passes `webhook=` (set `"param": "webhook"`). |
 | **Others** | Through `"hmac"` or your own `verify`, with a backend that sends the URL. |
 
 Without webhooks every provider still works: jobs check every `MEDIA_POLL_EVERY` seconds.
 
-fal's video APIs take the starting image as a public URL. Pass `image="https://..."`; bytes or a file raise `BadRequest` for fal models.
+fal's video APIs take the starting image as a string. A URL is passed as it is; bytes, a file or a `data:` URI go as a `data:` URI. A public URL keeps the request small.
 
 What happens to a webhook:
 
 - **A checked webhook** for a running job wakes that job, which asks the provider at once.
 - **The body isn't trusted:** a webhook only says "look now". The result always comes from the provider.
-- **While webhooks are on** for a provider, its jobs check only every `MEDIA_WEBHOOK_POLL_EVERY` seconds (60), in case a webhook never comes. Local development, where providers can't reach you, still finishes jobs this way.
+- **While a webhook can come** for a job, it checks only every `MEDIA_WEBHOOK_POLL_EVERY` seconds (60), in case one never does. A webhook can come when the URL is set in the provider's dashboard (no `param`), or when `param` and `MEDIA_WEBHOOK_URL` are set and the backend sends the URL. Otherwise jobs keep checking every `MEDIA_POLL_EVERY` seconds. Local development, where providers can't reach you, still finishes jobs this way.
 - **Responses:**
     - a webhook that fails its check gets 401;
     - one for a provider without an entry gets 404;
     - one for no running job gets 202 and changes nothing.
 - **System checks:**
     - `llm_kit.E003` reports an entry that needs a secret and has none;
-    - `llm_kit.W004` reports a `param` without `MEDIA_WEBHOOK_URL`.
+    - `llm_kit.W004` reports a `param` without `MEDIA_WEBHOOK_URL`;
+    - `llm_kit.W005` reports a `param` for a provider the media backend can't send the URL to (fal and Replicate through LiteLLM).
 
 ## Documents (OCR)
 

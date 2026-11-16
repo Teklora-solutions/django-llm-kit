@@ -173,10 +173,10 @@ class _Watcher(JobWatcher):
         self.kind = run.payload.get("kind", "")
         self.last: tuple | None = None
 
-    def extra_params(self, ref: str) -> dict[str, Any]:
+    def extra_params(self, ref: str, backend: Any = None) -> dict[str, Any]:
         from llm_kit.media import webhooks
 
-        return webhooks.submit_params(ref)
+        return webhooks.submit_params(ref, backend)
 
     async def submitted(self, ref: str, job_id: str, backend: Any) -> None:
         from llm_kit.background import log
@@ -203,7 +203,7 @@ class _Watcher(JobWatcher):
     async def pause(self, ref: str, seconds: float) -> None:
         from llm_kit.media import webhooks
 
-        if webhooks.config_for(ref) is not None:  # the provider says when: check rarely meanwhile
+        if webhooks.expected(ref, self.backend):  # the provider says when: check rarely meanwhile
             seconds = max(seconds, float(conf.get("MEDIA_WEBHOOK_POLL_EVERY") or 60))
         event = _wakes.setdefault(self.run.run_id, asyncio.Event())
         try:

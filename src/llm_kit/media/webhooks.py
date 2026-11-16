@@ -12,7 +12,7 @@ per provider (LiteLLM's provider names)::
         "MEDIA_WEBHOOKS": {
             "replicate": {"secret": "whsec_..."},                   # Standard Webhooks
             "openai": {"secret": "whsec_..."},                      # set the URL in OpenAI's dashboard
-            "fal_ai": {"param": "webhook_url"},                     # with a backend of your own (below)
+            "fal_ai": {"param": "webhook_url"},                     # only with a backend of your own (below)
             "acme": {"verify": "hmac", "header": "X-Acme-Signature", "secret": "...", "id": "job.id"},
             "other": {"verify": "myapp.hooks:verify", "id": "data.job"},
         },
@@ -33,7 +33,12 @@ Each provider's entry:
   Through LiteLLM (1.106) no video provider takes one: fal wants a ``fal_webhook`` query
   parameter, which LiteLLM's video calls don't send, and LiteLLM has no Replicate video. Give
   those providers a backend of your own that reads ``param`` (fal's ``fal_client.submit(...,
-  webhook_url=)``, Replicate's ``webhook=``).
+  webhook_url=)``, Replicate's ``webhook=``). With the LiteLLM backend the URL isn't sent, their
+  jobs keep checking every ``MEDIA_POLL_EVERY`` seconds, and ``llm_kit.W005`` says so.
+
+Jobs check rarely only while a webhook can actually come: the URL is set in the provider's
+dashboard (no ``param``), or ``param`` and ``MEDIA_WEBHOOK_URL`` are set and the backend sends
+it (a backend lists the providers it can't send it to in ``cannot_send_webhook_url``).
 
 A request that fails its check gets 401; one for a job that isn't running gets 202 and changes
 nothing.
@@ -79,13 +84,30 @@ def config_for(ref_or_provider: str) -> dict[str, Any] | None:
     return {**DEFAULTS.get(provider, {}), **dict(configured), "provider": provider}
 
 
-def submit_params(ref: str) -> dict[str, Any]:
-    """Provider parameters that give a new job the webhook URL, when the provider takes one."""
+def _cannot_send(config: dict[str, Any], backend: Any) -> bool:
+    return config["provider"] in (getattr(backend, "cannot_send_webhook_url", None) or ())
+
+
+def submit_params(ref: str, backend: Any = None) -> dict[str, Any]:
+    """Provider parameters that give a new job the webhook URL, when the provider takes one and
+    ``backend`` can send it."""
     config = config_for(ref)
     url = conf.get("MEDIA_WEBHOOK_URL") or ""
-    if not config or not config.get("param") or not url:
+    if not config or not config.get("param") or not url or _cannot_send(config, backend):
         return {}
     return {config["param"]: url.format(provider=config["provider"])}
+
+
+def expected(ref: str, backend: Any = None) -> bool:
+    """Whether a webhook can come for a job of ``ref``'s run through ``backend``: webhooks are on
+    for its provider, and the provider knows where to call (its dashboard, or the URL sent with
+    the job). Only then do its jobs check rarely (``MEDIA_WEBHOOK_POLL_EVERY``)."""
+    config = config_for(ref)
+    if config is None:
+        return False
+    if not config.get("param"):
+        return True  # the URL is set at the provider
+    return bool(conf.get("MEDIA_WEBHOOK_URL")) and not _cannot_send(config, backend)
 
 
 # ------------------------------------------------------------------ checks
@@ -128,27 +150,49 @@ def verify_hmac(request, config: dict[str, Any]) -> bool:
     return hmac.compare_digest(given, digest.hex()) or hmac.compare_digest(given, base64.b64encode(digest).decode())
 
 
-_fal_keys: tuple[float, list[bytes]] = (0.0, [])
-_fal_lock = threading.Lock()
+KEYS_FOR = 86400  # fal: cache its keys for at most 24 hours
+REFETCH_EVERY = 300  # at most one fetch per 5 minutes after a failed fetch or an unknown signature
+_fal: dict[str, Any] = {"keys": [], "fetched": None, "tried": None}
+_fal_fetching = threading.Lock()
 
 
-def _fal_public_keys() -> list[bytes]:
-    global _fal_keys
-    with _fal_lock:
-        fetched, keys = _fal_keys
-        if keys and time.monotonic() - fetched < 86400:
-            return keys
-        import httpx
+def _fetch_fal_keys() -> list[bytes]:
+    import httpx
 
-        response = httpx.get(FAL_KEYS_URL, timeout=10)
-        response.raise_for_status()
-        keys = []
-        for key in response.json().get("keys") or []:
-            x = key.get("x")
-            if x:
-                keys.append(base64.urlsafe_b64decode(x + "=" * (-len(x) % 4)))
-        _fal_keys = (time.monotonic(), keys)
-        return keys
+    response = httpx.get(FAL_KEYS_URL, timeout=10)
+    response.raise_for_status()
+    keys = []
+    for key in response.json().get("keys") or []:
+        x = key.get("x")
+        if x:
+            keys.append(base64.urlsafe_b64decode(x + "=" * (-len(x) % 4)))
+    return keys
+
+
+def _fal_public_keys(refresh: bool = False) -> list[bytes]:
+    """fal's published keys. ``refresh`` fetches again (a signature matched none: fal may have
+    rotated them). Fetches are at most every ``REFETCH_EVERY`` seconds, failed ones included, and
+    never wait on each other: a request arriving during a fetch uses the keys at hand."""
+    now = time.monotonic()
+    fresh = _fal["keys"] and _fal["fetched"] is not None and now - _fal["fetched"] < KEYS_FOR
+    if fresh and not refresh:
+        return _fal["keys"]
+    if _fal["tried"] is not None and now - _fal["tried"] < REFETCH_EVERY:
+        return _fal["keys"]
+    if not _fal_fetching.acquire(blocking=False):
+        return _fal["keys"]
+    try:
+        _fal["tried"] = now
+        keys = _fetch_fal_keys()
+        if keys:
+            _fal.update(keys=keys, fetched=now)
+        else:
+            logger.warning("fal published no webhook keys at %s", FAL_KEYS_URL)
+    except Exception:
+        logger.warning("Could not fetch fal's webhook keys", exc_info=True)
+    finally:
+        _fal_fetching.release()
+    return _fal["keys"]
 
 
 def verify_fal(request, config: dict[str, Any]) -> bool:
@@ -169,18 +213,26 @@ def verify_fal(request, config: dict[str, Any]) -> bool:
         if abs(time.time() - int(stamp)) > TOLERANCE:
             return False
         signature_bytes = bytes.fromhex(signature)
-        keys = config.get("public_keys") or _fal_public_keys()
-    except Exception:
-        logger.warning("Could not check a fal webhook", exc_info=True)
+    except ValueError:
         return False
     message = "\n".join([request_id, user_id, stamp, hashlib.sha256(request.body).hexdigest()]).encode()
-    for key in keys:
-        try:
-            Ed25519PublicKey.from_public_bytes(key).verify(signature_bytes, message)
-            return True
-        except (InvalidSignature, ValueError):
-            continue
-    return False
+
+    def signed_by(keys: list[bytes]) -> bool:
+        for key in keys:
+            try:
+                Ed25519PublicKey.from_public_bytes(key).verify(signature_bytes, message)
+                return True
+            except (InvalidSignature, ValueError):
+                continue
+        return False
+
+    if config.get("public_keys"):
+        return signed_by(config["public_keys"])
+    keys = _fal_public_keys()
+    if signed_by(keys):
+        return True
+    newer = _fal_public_keys(refresh=True)  # fal may have rotated its keys
+    return newer != keys and signed_by(newer)
 
 
 VERIFIERS = {"standard": verify_standard, "hmac": verify_hmac, "fal": verify_fal}

@@ -139,8 +139,8 @@ class JobWatcher:
         """Wait before the next check (return early to check sooner, after a webhook)."""
         await asyncio.sleep(seconds)
 
-    def extra_params(self, ref: str) -> dict[str, Any]:
-        """More provider parameters for the submission (a webhook URL)."""
+    def extra_params(self, ref: str, backend: Any = None) -> dict[str, Any]:
+        """More provider parameters for the submission (a webhook URL), sent through ``backend``."""
         return {}
 
 
@@ -155,7 +155,7 @@ async def _make_async(
 ) -> MediaResult:
     if call.kind.long and mb.supports_jobs(backend):
         watcher = watcher or JobWatcher()
-        extra = {**extra, **watcher.extra_params(ref)}
+        extra = {**extra, **watcher.extra_params(ref, backend)}
         job_id = await mb.asubmit(backend, call.kind.name, request, **extra)
         await watcher.submitted(ref, job_id, backend)
         deadline, every = time.monotonic() + _wait_for(wait), _poll_every()
