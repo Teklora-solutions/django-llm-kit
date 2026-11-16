@@ -12,7 +12,7 @@ per provider (LiteLLM's provider names)::
         "MEDIA_WEBHOOKS": {
             "replicate": {"secret": "whsec_..."},                   # Standard Webhooks
             "openai": {"secret": "whsec_..."},                      # set the URL in OpenAI's dashboard
-            "fal_ai": {"param": "webhook_url"},                     # ED25519, fal's public keys
+            "fal_ai": {"param": "webhook_url"},                     # with a backend of your own (below)
             "acme": {"verify": "hmac", "header": "X-Acme-Signature", "secret": "...", "id": "job.id"},
             "other": {"verify": "myapp.hooks:verify", "id": "data.job"},
         },
@@ -28,8 +28,12 @@ Each provider's entry:
   path to ``fn(request, config) -> bool``. Replicate, OpenAI and fal have theirs by default.
 * ``secret``: for ``standard`` and ``hmac``.
 * ``id``: where the job id is in the JSON body (dotted; defaults for the providers above).
-* ``param``: the provider parameter that takes the webhook URL on submission (sent with
-  ``MEDIA_WEBHOOK_URL``). Leave it out when the URL is set in the provider's dashboard.
+* ``param``: the parameter that takes the webhook URL on submission (sent with
+  ``MEDIA_WEBHOOK_URL``). Leave it out when the URL is set in the provider's dashboard (OpenAI).
+  Through LiteLLM (1.106) no video provider takes one: fal wants a ``fal_webhook`` query
+  parameter, which LiteLLM's video calls don't send, and LiteLLM has no Replicate video. Give
+  those providers a backend of your own that reads ``param`` (fal's ``fal_client.submit(...,
+  webhook_url=)``, Replicate's ``webhook=``).
 
 A request that fails its check gets 401; one for a job that isn't running gets 202 and changes
 nothing.
@@ -63,7 +67,7 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "openai": {"verify": "standard", "id": "data.id"},
     "fal_ai": {"verify": "fal", "id": "request_id"},
 }
-FAL_KEYS_URL = "https://rest.alpha.fal.ai/.well-known/jwks.json"
+FAL_KEYS_URL = "https://rest.fal.ai/.well-known/jwks.json"  # fal: cache for at most 24 hours
 
 
 def config_for(ref_or_provider: str) -> dict[str, Any] | None:

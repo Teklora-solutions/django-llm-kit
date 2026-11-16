@@ -111,6 +111,14 @@ def test_status_checks_reach_the_same_endpoint(litellm):
     assert litellm["content"] == {"video_id": "video_abc", "api_base": "https://proxy.example/v1", "api_key": "o"}
 
 
+def test_fal_takes_the_image_as_a_url(litellm):
+    point = video_tp(default="fal_ai/fal-ai/kling-video/v2/master/image-to-video", fallbacks=[])
+    point.video("waves", image="https://cdn.example/frame.png", env=env(keys={"fal_ai": ["f"]}))
+    assert litellm["generate"]["input_reference"] == "https://cdn.example/frame.png"
+    with pytest.raises(BadRequest, match="public URL"):
+        point.video("waves", image=PNG, env=env(keys={"fal_ai": ["f"]}))
+
+
 def test_litellm_video_async(litellm):
     result = asyncio.run(video_tp(fallbacks=[]).avideo("waves", env=env()))
     assert result.first.read() == MP4
@@ -324,6 +332,10 @@ def test_fal_signatures(rf):
     assert webhooks.verified(rf.post("/", body, content_type="application/json", **headers), config)
     tampered = rf.post("/", body + b" ", content_type="application/json", **headers)
     assert not webhooks.verified(tampered, config)
+
+
+def test_fal_public_keys_come_from_fals_published_address():
+    assert webhooks.FAL_KEYS_URL == "https://rest.fal.ai/.well-known/jwks.json"
 
 
 def test_the_webhook_url_goes_with_the_job_when_the_provider_takes_one(settings):

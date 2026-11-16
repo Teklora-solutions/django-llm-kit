@@ -70,6 +70,8 @@ class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         entry = self._record()
         path = self.path.split("?")[0]
+        if path.startswith("/fal/"):
+            return self._send(200, {"request_id": "r1", "status": "IN_QUEUE"})
         if path.endswith("/images/generations"):
             sent = json.loads(entry["body"])
             n = int(sent.get("n") or 1)
@@ -107,6 +109,13 @@ class Provider(BaseHTTPRequestHandler):
     def do_GET(self):
         self._record()
         path = self.path.split("?")[0]
+        if path.startswith("/fal/") and path.endswith("/requests/r1/status"):
+            VIDEO_CHECKS.append(path)
+            return self._send(200, {"status": "COMPLETED" if len(VIDEO_CHECKS) >= 2 else "IN_PROGRESS"})
+        if path.startswith("/fal/") and path.endswith("/requests/r1"):
+            return self._send(200, {"video": {"url": f"http://{self.headers['Host']}/files/v.mp4"}})
+        if path == "/files/v.mp4":
+            return self._send(200, MP4, "video/mp4")
         if path.endswith("/videos/video_1/content"):
             return self._send(200, MP4, "video/mp4")
         if path.endswith("/videos/video_1"):
@@ -237,3 +246,18 @@ def test_the_async_paths(server, settings):
     assert image.first.read() == PNG and edit.first.read() == PNG
     assert speech.first.mime_type == "audio/wav" and heard.text == "hello there"
     assert video.first.read() == MP4 and text.text == "# Invoice"
+
+
+def test_fal_video(server, settings):
+    settings.LLM_KIT = {**settings.LLM_KIT, "MEDIA_POLL_EVERY": 0}
+    root = server.removesuffix("/v1")
+    model = "fal_ai/fal-ai/kling-video/v2/master/image-to-video"
+    clips = touchpoint("e2e.fal", default=model, params={"api_base": f"{root}/fal"})
+    result = clips.video("waves", image="https://cdn.example/frame.png", seconds=5, env=env(keys={"fal_ai": ["f"]}))
+    submitted = SEEN[0]
+    assert submitted["path"] == "/fal/fal-ai/kling-video/v2/master/image-to-video"
+    assert submitted["auth"] == "Key f"
+    sent = json.loads(submitted["body"])
+    assert sent["prompt"] == "waves" and "https://cdn.example/frame.png" in json.dumps(sent)
+    assert [r["path"] for r in SEEN if r["path"].endswith("/status")]  # checked until done
+    assert result.first.read() == MP4 and result.job_id

@@ -204,7 +204,7 @@ LLM_KIT = {
     "MEDIA_WEBHOOKS": {
         "replicate": {"secret": "whsec_...", "param": "webhook"},
         "openai": {"secret": "whsec_..."},          # the URL is set in OpenAI's dashboard
-        "fal_ai": {"param": "webhook_url"},
+        "fal_ai": {"param": "webhook_url"},         # with a backend of your own: see below
         "acme": {"verify": "hmac", "header": "X-Acme-Signature", "secret": "...", "id": "job.id"},
         "other": {"verify": "myapp.hooks:verify", "id": "data.job_id"},
     },
@@ -219,7 +219,20 @@ The route is `POST llm/media/webhooks/<provider>/`, included with `llm_kit.trans
 | `verify` | how a webhook is checked: `"standard"` ([Standard Webhooks](https://www.standardwebhooks.com/), used by Replicate and OpenAI), `"hmac"` (an HMAC-SHA256 of the body in `header`), `"fal"` (fal's ED25519 signatures, checked with fal's published keys; needs `cryptography`), or a dotted path to your own `fn(request, config) -> bool`. Replicate, OpenAI and fal have theirs by default |
 | `secret` | the signing secret, for `standard` and `hmac` |
 | `id` | where the job id is in the JSON body (dotted). There are defaults for Replicate, OpenAI and fal |
-| `param` | the provider parameter that takes the webhook URL when a job is submitted, sent with `MEDIA_WEBHOOK_URL`. Leave it out when the URL is set in the provider's dashboard, and check what your provider's API calls it |
+| `param` | the parameter that takes the webhook URL when a job is submitted, sent with `MEDIA_WEBHOOK_URL`. Leave it out when the URL is set in the provider's dashboard (OpenAI) |
+
+Which providers can send them:
+
+| Provider | How |
+|---|---|
+| **OpenAI** (Sora) | Set the URL in OpenAI's dashboard, and add `{"secret": ...}`. The video id is in `data.id`. Works with the LiteLLM backend. |
+| **fal** | Each job names its URL in a `fal_webhook` query parameter. LiteLLM's video calls (1.106) don't send query parameters, so use a [backend of your own](#your-own-backend) for fal video that submits with `fal_client.submit(..., webhook_url=params["webhook_url"])`, and set `"param": "webhook_url"`. |
+| **Replicate** | LiteLLM has no Replicate video. A backend of your own passes `webhook=` (set `"param": "webhook"`). |
+| **Others** | Through `"hmac"` or your own `verify`, with a backend that sends the URL. |
+
+Without webhooks every provider still works: jobs check every `MEDIA_POLL_EVERY` seconds.
+
+fal's video APIs take the starting image as a public URL. Pass `image="https://..."`; bytes or a file raise `BadRequest` for fal models.
 
 What happens to a webhook:
 
